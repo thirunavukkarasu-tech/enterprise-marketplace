@@ -1,0 +1,104 @@
+@import 'tailwindcss';
+@import './styles/fonts.css';
+
+/*
+ * MarketSphere design tokens.
+ *
+ * Palette rationale (kept out of the generic AI-portfolio defaults —
+ * no cream+terracotta, no near-black+neon, no broadsheet hairlines):
+ *   - ink/canvas: a soft blue-black on cool off-white, not pure
+ *     black-on-white or warm cream. Reads as considered, not templated.
+ *   - indigo: the brand primary — a violet-leaning indigo rather than the
+ *     ubiquitous SaaS #2563EB blue.
+ *   - marigold: a warm marketplace gold reserved for primary actions and
+ *     price emphasis, evoking a market stall awning rather than a generic
+ *     "gradient CTA".
+ *   - emerald / coral: functional color for stock and status states.
+ */
+@theme {
+  --color-canvas: #f6f7fb;
+  --color-canvas-raised: #ffffff;
+  --color-ink: #12172b;
+  --color-ink-soft: #454a63;
+  --color-slate: #5b6178;
+  --color-slate-200: #e2e4ec;
+  --color-slate-100: #edeef4;
+
+  --color-indigo-50: #eef0fd;
+  --color-indigo-100: #dde1fb;
+  --color-indigo-300: #97a1f0;
+  --color-indigo-500: #3d4fe0;
+  --color-indigo-600: #2f3ec4;
+  --color-indigo-700: #2530a0;
+  --color-indigo-900: #171c56;
+
+  --color-marigold-100: #fdecc8;
+  --color-marigold-400: #f5a623;
+  --color-marigold-500: #dc8f13;
+  --color-marigold-600: #b8760c;
+
+  --color-emerald-100: #d9f3e7;
+  --color-emerald-500: #1e9e6b;
+  --color-emerald-600: #17805770;
+
+  --color-coral-100: #fbe0db;
+  --color-coral-500: #e1523d;
+  --color-coral-600: #c23f2c;
+
+  --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 1rem;
+
+  --shadow-panel: 0 1px 2px rgba(18, 23, 43, 0.04), 0 8px 24px -12px rgba(18, 23, 43, 0.12);
+  --shadow-panel-lg: 0 4px 8px rgba(18, 23, 43, 0.04), 0 24px 48px -16px rgba(18, 23, 43, 0.18);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-slate-200);
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+    letter-spacing: -0.01em;
+  }
+
+  /* Visible keyboard focus everywhere — never suppressed for aesthetics. */
+  :focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .font-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
