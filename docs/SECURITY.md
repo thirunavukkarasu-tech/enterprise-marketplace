@@ -1,41 +1,69 @@
 # Security — MarketSphere
 
-## 1. Authentication (Phase 2)
+> Status note: Phase 2 (Authentication & RBAC) is implemented — §1–§3
+> below describe what's actually running, not a plan. §7 onward remain
+> forward-looking, as noted.
 
-- **Password storage**: bcrypt, cost factor 12. Never logged, never
-  returned in any API response (enforced by a Mongoose `toJSON` transform
-  that strips `passwordHash`).
-- **Access token**: short-lived JWT (15 min default), returned in the
-  response body, held in memory on the client (Redux) — never
-  `localStorage`, to limit the blast radius of an XSS bug.
-- **Refresh token**: longer-lived JWT (7 days), set as an `httpOnly`,
-  `secure` (in production), `sameSite=strict` cookie. Never readable by
-  client-side JavaScript.
-- **Refresh token rotation + reuse detection**: each refresh issues a new
-  refresh token and invalidates the old one (`refreshTokenVersion` on the
-  `User` model). If an already-used/rotated token is presented again, that
-  signals token theft — all sessions for that user are invalidated and
-  re-authentication is required.
+## 1. Authentication (Phase 2 — implemented)
+
+- **Password storage**: bcrypt, cost factor 12 (`bcryptjs`, a pure-JS
+  implementation — avoids a native build dependency for a hashing cost
+  that's plenty fast at this scale). Never logged; `select: false` on the
+  schema so it's never returned unless explicitly queried, and stripped
+  again by a `toJSON` transform as a second layer of defense.
+- **Access token**: JWT, 15 min default (`JWT_ACCESS_EXPIRY`), returned in
+  the response body, held in memory on the client (Redux) — never
+  `localStorage`, to limit the blast radius of an XSS bug. Lost on page
+  reload by design; re-minted via silent refresh against the httpOnly
+  cookie.
+- **Refresh token**: JWT, 7 days default (`JWT_REFRESH_EXPIRY`), set as an
+  `httpOnly`, `secure` (in production), `sameSite=strict` cookie, scoped
+  to the `/api/v1/auth` path only — never attached to product/order/etc.
+  requests, only the handful of auth endpoints that need it.
+- **Refresh token rotation + reuse detection**: backed by a dedicated
+  `RefreshToken` collection (see `docs/DATABASE.md`), not just a JWT
+  claim. Every refresh call revokes the presented token and issues a new
+  one in the same rotation "family." If an already-revoked token is
+  presented again — the signature of a stolen token being replayed after
+  the legitimate client has already moved on — the **entire family** is
+  revoked, forcing both the attacker and the legitimate client to
+  re-authenticate. This is stronger than relying on the JWT's own expiry
+  alone, since a stolen-but-not-yet-expired token would otherwise stay
+  valid for its full remaining lifetime.
+- **Live account-status check**: `requireAuth` re-checks `isActive`
+  against the database on every request rather than trusting the access
+  token's claims for its full 15-minute lifetime — a deactivated account
+  takes effect on the very next request, not up to 15 minutes later.
 - **Generic authentication errors**: login failures return the same
   "Invalid email or password" message whether the email doesn't exist or
   the password is wrong — never reveal which one, to prevent user
-  enumeration.
+  enumeration. `forgot-password` returns the same response regardless of
+  whether the account exists, for the same reason.
+- **Password reset revokes all sessions**: resetting a password
+  invalidates every refresh token on the account, not just the one used to
+  request the reset — a stolen session shouldn't survive its owner
+  regaining control.
 
-## 2. Authorization (RBAC)
+## 2. Authorization (RBAC) (Phase 2 — implemented)
 
 - Every protected route declares the roles allowed to call it via a
   `requireRole(...roles)` middleware, checked **server-side only** — the
-  frontend hiding a button is a UX nicety, never a security boundary.
-- Resource-level checks go further than role checks where needed: a vendor
-  with the `vendor` role can only mutate *their own* products/orders, not
-  any vendor's — enforced in the service layer by scoping the query to
-  `req.user.id`, not just checking the role.
+  frontend hiding a button (`ProtectedRoute`) is a UX nicety, never a
+  security boundary.
+- Only Customer and Vendor roles can self-register (`PUBLIC_REGISTERABLE_ROLES`,
+  enforced in the Zod schema, not just the frontend form) — see
+  `docs/ARCHITECTURE.md` for why Super Admin and Delivery Partner accounts
+  are provisioned differently.
+- Resource-level ownership checks (e.g. "a vendor can only edit their own
+  products") aren't applicable yet — no vendor-owned resources exist until
+  Phase 3/4 — but the pattern (scope the query to `req.user.id`, not just
+  check the role) is documented in `ARCHITECTURE.md` for when they land.
 
-## 3. Input validation
+## 3. Input validation (Phase 2 — implemented for auth; the pattern applies platform-wide)
 
-- Every request body/query/params that reaches a controller has already
-  passed through a Zod schema in `validators/`. Validation failures return
-  a `400` with field-level messages, never a raw stack trace.
+- Every auth request body passes through a Zod schema (`validators/auth.validator.js`)
+  before reaching a controller. Validation failures return a `400` with
+  field-level messages, never a raw stack trace.
 - `express-mongo-sanitize` strips any key starting with `$` or containing
   `.` from `req.body`/`query`/`params` before it can reach a Mongoose
   query — the standard defense against NoSQL operator injection
@@ -54,14 +82,17 @@
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 5. Rate limiting
+## 5. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
-- A strict **auth limiter** (20 requests / 15 min per IP) applies
-  specifically to login, registration, and password-reset routes —
-  brute-force and credential-stuffing targets need a much tighter window
-  than general API traffic.
+- A strict **auth limiter** (20 requests / 15 min per IP) applies to
+  `register`, `login`, `refresh`, `forgot-password`, and `reset-password`
+  — brute-force, credential-stuffing, and refresh-token-guessing targets
+  all need a much tighter window than general API traffic. `logout` and
+  `me` are intentionally left off this limiter — they're not attack
+  surfaces in the same way, and a legitimate user shouldn't be throttled
+  for normal use.
 
 ## 6. Error handling
 
@@ -87,13 +118,18 @@
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 9. Audit logging
+## 9. Audit logging (Phase 10 — not yet implemented)
 
-- Security- and business-sensitive actions (login, vendor approval/
-  rejection, role changes, refunds, order-status overrides) are written to
-  an append-only `AuditLog` collection with the acting user, action, and
-  target — the trail an admin or incident responder would need to
-  reconstruct "who did what."
+A dedicated, queryable `AuditLog` collection (actor, action, target,
+timestamp) is planned for Phase 10, alongside the admin tooling that would
+actually consume it. In the meantime, Phase 2 logs the security-relevant
+auth events — registration, login, password-reset requests/completions,
+email verification, and refresh-token reuse detection — through the
+standard Winston logger (`config/logger.js`) with the acting user's id.
+That's useful for local debugging and demonstrates the events worth
+tracking, but it is **not** a substitute for the real audit trail: it's
+unstructured relative to a query-able collection and isn't retained
+independently of normal log rotation.
 
 ## 10. What's intentionally deferred
 

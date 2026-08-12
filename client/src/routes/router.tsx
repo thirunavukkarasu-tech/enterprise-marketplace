@@ -4,12 +4,22 @@ import { LayoutDashboard, Store, Boxes, ShoppingCart, Users, Settings } from 'lu
 import { StorefrontLayout } from '../layouts/StorefrontLayout';
 import { DashboardLayout } from '../layouts/DashboardLayout';
 import { DeliveryLayout } from '../layouts/DeliveryLayout';
+import { AuthLayout } from '../layouts/AuthLayout';
 
 import { StorefrontHome } from '../pages/storefront/StorefrontHome';
 import { AdminOverview } from '../pages/admin/AdminOverview';
 import { VendorOverview } from '../pages/vendor/VendorOverview';
 import { DeliveryActive } from '../pages/delivery/DeliveryActive';
 import { PlaceholderPage } from '../components/common/PlaceholderPage';
+import { Unauthorized } from '../pages/Unauthorized';
+
+import { Login } from '../pages/auth/Login';
+import { Register } from '../pages/auth/Register';
+import { ForgotPassword } from '../pages/auth/ForgotPassword';
+import { ResetPassword } from '../pages/auth/ResetPassword';
+import { VerifyEmail } from '../pages/auth/VerifyEmail';
+
+import { ProtectedRoute } from './ProtectedRoute';
 
 const adminNav = [
   { to: '/admin', label: 'Overview', icon: LayoutDashboard },
@@ -39,20 +49,40 @@ export const router = createBrowserRouter([
     ],
   },
   {
+    path: '/',
+    element: <AuthLayout />,
+    children: [
+      { path: 'login', element: <Login /> },
+      { path: 'register', element: <Register /> },
+      { path: 'forgot-password', element: <ForgotPassword /> },
+      { path: 'reset-password/:token', element: <ResetPassword /> },
+      { path: 'verify-email/:token', element: <VerifyEmail /> },
+    ],
+  },
+  { path: '/unauthorized', element: <Unauthorized /> },
+  {
     path: '/admin',
-    element: <DashboardLayout navItems={adminNav} roleLabel="Super Admin" roleTone="indigo" />,
+    element: (
+      <ProtectedRoute allowedRoles={['super_admin']}>
+        <DashboardLayout navItems={adminNav} roleLabel="Super Admin" roleTone="indigo" />
+      </ProtectedRoute>
+    ),
     children: [
       { index: true, element: <AdminOverview /> },
       { path: 'vendors', element: <PlaceholderPage title="Vendor approvals" phase="Phase 4" /> },
       { path: 'products', element: <PlaceholderPage title="Product moderation" phase="Phase 3" /> },
       { path: 'orders', element: <PlaceholderPage title="Order monitoring" phase="Phase 7" /> },
-      { path: 'customers', element: <PlaceholderPage title="Customer management" phase="Phase 2" /> },
+      { path: 'customers', element: <PlaceholderPage title="Customer management" phase="Phase 4" /> },
       { path: 'settings', element: <PlaceholderPage title="System settings" phase="Phase 10" /> },
     ],
   },
   {
     path: '/vendor',
-    element: <DashboardLayout navItems={vendorNav} roleLabel="Vendor" roleTone="marigold" />,
+    element: (
+      <ProtectedRoute allowedRoles={['vendor']}>
+        <DashboardLayout navItems={vendorNav} roleLabel="Vendor" roleTone="marigold" />
+      </ProtectedRoute>
+    ),
     children: [
       { index: true, element: <VendorOverview /> },
       { path: 'products', element: <PlaceholderPage title="Product management" phase="Phase 3" /> },
@@ -62,7 +92,11 @@ export const router = createBrowserRouter([
   },
   {
     path: '/delivery',
-    element: <DeliveryLayout />,
+    element: (
+      <ProtectedRoute allowedRoles={['delivery_partner']}>
+        <DeliveryLayout />
+      </ProtectedRoute>
+    ),
     children: [
       { index: true, element: <DeliveryActive /> },
       { path: 'tracking', element: <PlaceholderPage title="Live tracking" phase="Phase 8" /> },

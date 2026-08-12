@@ -5,8 +5,8 @@
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Foundation & architecture | ✅ Complete |
-| 2 | Authentication & RBAC | ⏳ Next |
-| 3 | Product & category management | Planned |
+| 2 | Authentication & RBAC | ✅ Complete |
+| 3 | Product & category management | ⏳ Next |
 | 4 | Vendor management | Planned |
 | 5 | Customer shopping experience | Planned |
 | 6 | Cart & checkout | Planned |
@@ -16,16 +16,40 @@
 | 10 | Analytics, audit logs, testing & hardening | Planned |
 | 11 | Deployment, documentation & portfolio polish | Planned |
 
-## Phase 2 preview — Authentication & RBAC
+## Phase 2 summary — Authentication & RBAC (complete)
 
-- User model + registration/login/logout
-- Access + refresh token issuance, rotation, and reuse detection
-- Email verification and password-reset flows (email sending stays
-  abstracted behind an interface — no real SMTP provider wired yet)
-- `requireAuth` and `requireRole(...)` middleware
-- Protected-route wiring on the frontend (`<RequireAuth>` wrapper,
-  role-aware redirects out of `/admin`, `/vendor`, `/delivery`)
-- Session slice wired into the Redux store already scaffolded in Phase 1
+- `User` and `RefreshToken` models; register/login/logout
+- Access + refresh token issuance, rotation, and reuse detection (backed
+  by a real `RefreshToken` collection, not just JWT claims)
+- Email verification and password-reset flows, with email sending
+  abstracted behind `emailService` (dev mode logs the link to the
+  console — no real SMTP/provider wired up yet)
+- `requireAuth` (with a live DB active-status check) and `requireRole(...)`
+  middleware; only Customer/Vendor can self-register
+- Auth-specific rate limiting on register/login/refresh/forgot/reset
+- Frontend: Redux auth slice with async thunks, an Axios interceptor doing
+  single-flight silent refresh on 401, `ProtectedRoute` enforcing
+  role-based access on `/admin`, `/vendor`, `/delivery`, and role-aware
+  navigation (sign-in/sign-out, dashboard links)
+- Demo/seed users for all four roles (`npm run seed`)
+- 22 passing unit tests (tokens, validators, RBAC middleware) + a full
+  integration suite for the auth flow (register→login→refresh
+  rotation→logout, reuse detection, generic error messages) — written and
+  ready to run against a real MongoDB instance; see `README.md` for how
+
+## Phase 3 preview — Product & Category Management
+
+- `Product` and `Category` models (see `docs/DATABASE.md` for the
+  embed/reference decisions already made for variants and SKUs)
+- Public product listing, filtering, sorting, search, and pagination
+  endpoints
+- Vendor-facing product CRUD, scoped to `req.user.id` — the first place
+  the "role check vs. resource-ownership check" distinction from
+  `SECURITY.md` §2 actually matters
+- Admin product moderation endpoints
+- Frontend: real product cards on the storefront home (replacing the
+  category placeholder grid), a product detail page, and the vendor
+  product-management screen (replacing its Phase-3 placeholder)
 
 ## Beyond Phase 11 — future improvements
 

@@ -5,8 +5,8 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 1 of 11 complete — foundation, architecture, and design
-> system. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
+> **Status**: Phase 2 of 11 complete — foundation, design system, and full
+> authentication/RBAC. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
 
 ## Overview
 
@@ -67,7 +67,7 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 
 | Domain | Phase |
 |---|---|
-| Auth, sessions, RBAC | 2 |
+| Auth, sessions, RBAC | 2 ✅ |
 | Product & category catalog | 3 |
 | Vendor onboarding & approval | 4 |
 | Customer browsing, search, wishlist | 5 |
@@ -107,6 +107,26 @@ npm install
 npm run dev                 # http://localhost:5000
 ```
 
+### Seed demo users (optional, but recommended)
+
+```bash
+cd server
+npm run seed
+```
+
+Creates one account per role with fixed, published credentials — for
+local/demo use only, never for a real deployment:
+
+| Role | Email | Password |
+|---|---|---|
+| Super Admin | `admin@marketsphere.dev` | `Admin@12345` |
+| Vendor | `vendor@marketsphere.dev` | `Vendor@12345` |
+| Customer | `customer@marketsphere.dev` | `Customer@12345` |
+| Delivery Partner | `delivery@marketsphere.dev` | `Delivery@12345` |
+
+All four are created with `isEmailVerified: true` so they can log in
+immediately without walking through the verification email step.
+
 ### Frontend
 
 ```bash
@@ -122,6 +142,19 @@ npm run dev                 # http://localhost:5173
 cd server
 npm test
 ```
+
+This runs the full unit test suite (JWT signing/verification, token
+hashing, Zod validators, RBAC middleware — no database required) plus the
+Phase 1 health-check integration tests. The Phase 2 **auth integration
+suite** (full register → login → refresh-rotation → logout flow, reuse
+detection, etc.) needs a real MongoDB connection and is skipped by
+default; to run it:
+
+```bash
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
+```
+
+It creates its own isolated database and drops it when finished.
 
 ## Environment variables
 
@@ -139,8 +172,10 @@ Versioned under `/api/v1`. Every response follows:
 { "success": true, "message": "...", "data": { ... } }
 ```
 
-Full endpoint reference lands in `docs/API.md` as each domain's routes
-ship — Phase 1 only exposes the health check.
+Full reference for the authentication endpoints (register, login, logout,
+refresh, forgot/reset password, email verification, `/me`) is in
+[`docs/API.md`](docs/API.md). Product, vendor, order, and other domain
+endpoints are added there as their phases ship.
 
 ## Health check
 

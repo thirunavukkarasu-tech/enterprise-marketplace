@@ -1,6 +1,8 @@
-import { Outlet, NavLink } from 'react-router-dom';
-import { Package, MapPin, History } from 'lucide-react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Package, MapPin, History, LogOut } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
+import { useAppDispatch } from '../hooks/useAppStore';
+import { logoutUser } from '../features/auth/authSlice';
 import { cn } from '../utils/cn';
 
 const tabs = [
@@ -15,13 +17,26 @@ const tabs = [
  * and it's built mobile-first (the sidebar dashboards are desktop-first).
  */
 export function DeliveryLayout() {
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await dispatch(logoutUser());
+    navigate('/login');
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-canvas-raised px-4">
         <Logo />
-        <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-mono text-xs font-medium text-emerald-600">
-          ON DUTY
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-mono text-xs font-medium text-emerald-600">
+            ON DUTY
+          </span>
+          <button onClick={handleLogout} aria-label="Sign out" className="text-slate hover:text-coral-600">
+            <LogOut size={17} />
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 pb-16">

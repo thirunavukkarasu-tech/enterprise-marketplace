@@ -1,6 +1,10 @@
-import { Outlet, Link, NavLink } from 'react-router-dom';
+import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
+import { LogOut, LayoutDashboard } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
 import { Button } from '../components/ui/Button';
+import { useAppDispatch, useAppSelector } from '../hooks/useAppStore';
+import { logoutUser } from '../features/auth/authSlice';
+import { homePathForRole } from '../utils/roleHome';
 import { cn } from '../utils/cn';
 
 const navLinks = [
@@ -10,6 +14,17 @@ const navLinks = [
 ];
 
 export function StorefrontLayout() {
+  const { user, status } = useAppSelector((state) => state.auth);
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await dispatch(logoutUser());
+    navigate('/');
+  };
+
+  const dashboardPath = user ? homePathForRole(user.role) : null;
+
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-canvas-raised/95 backdrop-blur">
@@ -23,6 +38,7 @@ export function StorefrontLayout() {
               <NavLink
                 key={link.to}
                 to={link.to}
+                end={link.to === '/'}
                 className={({ isActive }) =>
                   cn(
                     'text-sm font-medium text-ink-soft transition-colors hover:text-ink',
@@ -36,12 +52,34 @@ export function StorefrontLayout() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm">
-              Sign in
-            </Button>
-            <Button variant="primary" size="sm">
-              Create account
-            </Button>
+            {status === 'authenticated' && user ? (
+              <>
+                {dashboardPath && dashboardPath !== '/' && (
+                  <Link to={dashboardPath}>
+                    <Button variant="ghost" size="sm">
+                      <LayoutDashboard size={15} /> Dashboard
+                    </Button>
+                  </Link>
+                )}
+                <span className="hidden text-sm font-medium text-ink-soft sm:inline">Hi, {user.name.split(' ')[0]}</span>
+                <Button variant="secondary" size="sm" onClick={handleLogout}>
+                  <LogOut size={15} /> Sign out
+                </Button>
+              </>
+            ) : (
+              <>
+                <Link to="/login">
+                  <Button variant="ghost" size="sm">
+                    Sign in
+                  </Button>
+                </Link>
+                <Link to="/register">
+                  <Button variant="primary" size="sm">
+                    Create account
+                  </Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
