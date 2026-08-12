@@ -1,8 +1,8 @@
 # Security — MarketSphere
 
-> Status note: Phase 2 (Authentication & RBAC) is implemented — §1–§3
-> below describe what's actually running, not a plan. §7 onward remain
-> forward-looking, as noted.
+> Status note: Phases 2 (Authentication & RBAC) and 3 (Product & Category
+> Management) are implemented — §1–§4 below describe what's actually
+> running, not a plan. §8 onward remain forward-looking, as noted.
 
 ## 1. Authentication (Phase 2 — implemented)
 
@@ -54,12 +54,38 @@
   enforced in the Zod schema, not just the frontend form) — see
   `docs/ARCHITECTURE.md` for why Super Admin and Delivery Partner accounts
   are provisioned differently.
-- Resource-level ownership checks (e.g. "a vendor can only edit their own
-  products") aren't applicable yet — no vendor-owned resources exist until
-  Phase 3/4 — but the pattern (scope the query to `req.user.id`, not just
-  check the role) is documented in `ARCHITECTURE.md` for when they land.
+- Resource-level ownership is a **separate check from the role check**,
+  layered on top of it — see §3 below for how this actually works for
+  products, the first resource type where it applies.
 
-## 3. Input validation (Phase 2 — implemented for auth; the pattern applies platform-wide)
+## 3. Resource ownership (Phase 3 — implemented)
+
+Role membership answers "can this role call this route at all." It does
+not answer "does this specific vendor own this specific product" — that
+second question is a distinct check, enforced in the service layer, every
+time:
+
+- `canManageProduct(user, product)` (`utils/ownership.js`) is a pure,
+  unit-tested function: `true` for a `super_admin` regardless of owner
+  (moderation), `true` for the vendor who owns the product, `false`
+  otherwise. Every mutating product/variant operation in `productService`
+  calls it before touching the database — there's exactly one place this
+  rule is implemented, not one copy per controller action.
+- **The vendor scope on list endpoints is forced server-side, never
+  trusted from the query string.** `GET /products/manage?vendor=<id>` — a
+  vendor's `vendor` filter is always overwritten with their own id in
+  `productService.listManaged`, regardless of what the request sends.
+  Only a `super_admin` may pass an arbitrary `vendor` filter. This means
+  there is no query-parameter path that lets one vendor list, view, or
+  edit another vendor's products — verified directly in
+  `tests/integration/products.test.js` (vendor B is rejected with `403`
+  attempting to update/delete vendor A's product, and vendor A's listings
+  never appear in vendor B's managed list).
+- The same ownership check gates the variant/SKU sub-resource endpoints
+  (add/update/remove) — a vendor cannot reprice or restock a product they
+  don't own even if they know its id.
+
+## 4. Input validation (Phase 2 for auth, Phase 3 for products/categories — the pattern applies platform-wide)
 
 - Every auth request body passes through a Zod schema (`validators/auth.validator.js`)
   before reaching a controller. Validation failures return a `400` with
@@ -71,7 +97,7 @@
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 4. Transport & headers
+## 5. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -82,7 +108,7 @@
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 5. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 6. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -94,7 +120,7 @@
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 6. Error handling
+## 7. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -103,14 +129,14 @@
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 7. File uploads (Phase 3/4)
+## 8. File uploads (Phase 4+ — not yet implemented)
 
 - Uploads (product images, vendor KYC documents) are validated by
   MIME-type allowlist and size limit before being forwarded to object
   storage — never trusted based on file extension alone, and never written
   to the API server's own disk.
 
-## 8. Secrets
+## 9. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -118,7 +144,7 @@
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 9. Audit logging (Phase 10 — not yet implemented)
+## 10. Audit logging (Phase 10 — not yet implemented)
 
 A dedicated, queryable `AuditLog` collection (actor, action, target,
 timestamp) is planned for Phase 10, alongside the admin tooling that would
@@ -131,7 +157,7 @@ tracking, but it is **not** a substitute for the real audit trail: it's
 unstructured relative to a query-able collection and isn't retained
 independently of normal log rotation.
 
-## 10. What's intentionally deferred
+## 11. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and

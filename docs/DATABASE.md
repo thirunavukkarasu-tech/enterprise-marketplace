@@ -65,22 +65,66 @@ documents, and payout details are meaningless for the other three roles —
 keeping them apart avoids a User schema full of nullable vendor-only
 fields.
 
-### Product
+### Product — **implemented in Phase 3** (this section is the as-built design, not the original speculative plan)
 ```
 Product {
   _id
-  vendor           ref → Vendor (indexed)
+  vendor           ref → User (indexed) — see note below
   category         ref → Category (indexed)
   title, description, slug (unique, indexed)
-  variants         [ { sku (unique, indexed), attributes, price, compareAtPrice, stock } ]
+  variants         [ { sku (globally unique, indexed), attributes, price, compareAtPrice, stock, reservedStock } ]
   images           [ { url, alt } ]
   status           enum: draft | active | archived
+  priceRange       { min, max }              // denormalized, recomputed on every variant change
   ratingAverage, ratingCount
   createdAt / updatedAt
 }
 ```
-Compound index on `{ vendor: 1, status: 1 }` (vendor's product list),
-text index on `{ title, description }` (search), index on `slug`.
+Indexes: `{ vendor: 1, status: 1 }` (vendor's own product list), `{ category: 1, status: 1 }` (category browsing), `{ status: 1, 'priceRange.min': 1 }` (storefront price sort), text index on `{ title, description }` (search), unique index on `variants.sku` (global SKU uniqueness — Mongo enforces this across every document, not just within one product, because a unique index on an array field path is multikey).
+
+Two decisions worth calling out that weren't obvious from the original Phase 1 plan:
+
+- **`vendor` references `User`, not `Vendor`.** The dedicated `Vendor`
+  collection (storefront metadata, approval status, payout details)
+  doesn't exist until Phase 4 — building Product in Phase 3 meant either
+  blocking on Phase 4 or pointing at what actually exists today. Every
+  vendor-scoping check in the app compares this field against
+  `req.user.id`, so Phase 4 repointing it at `Vendor._id` is a one-line
+  service change, not a data migration — `Vendor.user` will still be a
+  1:1 pointer back to the same `User`.
+- **`priceRange.{min,max}` is denormalized**, recomputed by
+  `productService`/`pricing.js` on every create/update/variant change.
+  Sorting or filtering a storefront listing by price without this would
+  mean unwinding the `variants` array on every query — cheap to keep in
+  sync, expensive to compute on the fly at listing scale.
+- **`reservedStock` exists on every variant now, always `0`.** Nothing
+  reserves stock yet — checkout doesn't exist until Phase 6/7. Adding the
+  field later would mean a migration touching every existing product;
+  defining it now costs nothing and keeps the schema stable once orders
+  start writing to it. `availableStock` (`stock - reservedStock`) is
+  never stored — always derived, so it can't drift from its inputs.
+
+### Category — **implemented in Phase 3**
+```
+Category {
+  _id
+  name, slug (unique, indexed)
+  description
+  parent           ref → Category | null    // self-referencing, enables subcategories
+  image            { url, alt }
+  isActive
+  createdAt / updatedAt
+}
+```
+Self-referencing `parent` gives one collection both top-level categories
+and subcategories without a separate model. Kept flat (not a nested
+embedded tree) so categories can be queried/paginated/moderated like any
+other collection — the tree shape needed for storefront navigation is
+assembled from a flat list in the service layer, which is cheap at
+marketplace-category scale (tens to a few hundred documents). Deleting a
+category is blocked (`409`) if it still has subcategories or products,
+rather than cascading — an accidental delete shouldn't silently orphan a
+product's category reference.
 
 ### Order
 ```
@@ -124,12 +168,14 @@ Cart {
 ```
 
 ### Inventory
-Stock lives on the `Product.variants[].stock` field for simple reads, with
-a companion **`InventoryLedger`** collection (separate, append-only) for
-every stock change (`reserve`, `release`, `adjust`, `sale`) — the audit
-trail a real e-commerce system needs to explain "why does this SKU show 4
-units" is a query problem, not something that belongs on the product
-document itself.
+Stock lives on `Product.variants[].stock` for simple reads, with a
+`reservedStock` counterpart already on the same subdocument (added in
+Phase 3, held at `0` until Phase 6/7 checkout writes to it — see the
+Product section above). A companion **`InventoryLedger`** collection
+(separate, append-only, Phase 7) will record every stock change
+(`reserve`, `release`, `adjust`, `sale`) — the audit trail a real
+e-commerce system needs to explain "why does this SKU show 4 units" is a
+query problem, not something that belongs on the product document itself.
 
 ### Coupon
 ```

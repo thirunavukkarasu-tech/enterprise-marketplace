@@ -6,8 +6,8 @@
 |---|---|---|
 | 1 | Foundation & architecture | ✅ Complete |
 | 2 | Authentication & RBAC | ✅ Complete |
-| 3 | Product & category management | ⏳ Next |
-| 4 | Vendor management | Planned |
+| 3 | Product & category management | ✅ Complete |
+| 4 | Vendor management | ⏳ Next |
 | 5 | Customer shopping experience | Planned |
 | 6 | Cart & checkout | Planned |
 | 7 | Orders, inventory & payments | Planned |
@@ -37,19 +37,50 @@
   rotation→logout, reuse detection, generic error messages) — written and
   ready to run against a real MongoDB instance; see `README.md` for how
 
-## Phase 3 preview — Product & Category Management
+## Phase 3 summary — Product & Category Management (complete)
 
-- `Product` and `Category` models (see `docs/DATABASE.md` for the
-  embed/reference decisions already made for variants and SKUs)
-- Public product listing, filtering, sorting, search, and pagination
-  endpoints
-- Vendor-facing product CRUD, scoped to `req.user.id` — the first place
-  the "role check vs. resource-ownership check" distinction from
-  `SECURITY.md` §2 actually matters
-- Admin product moderation endpoints
-- Frontend: real product cards on the storefront home (replacing the
-  category placeholder grid), a product detail page, and the vendor
-  product-management screen (replacing its Phase-3 placeholder)
+- `Category` model (self-referencing `parent` for subcategories, admin-only
+  writes, public reads) and `Product` model (embedded variants/SKUs,
+  denormalized `priceRange` for efficient sort/filter, `reservedStock`
+  defined now but always `0` until Phase 7's checkout writes to it)
+- Global SKU uniqueness enforced at the database level via a unique index
+  on `variants.sku`
+- Public storefront endpoints: search (`$text`), category/price filtering,
+  five sort options, and page/limit pagination — draft and archived
+  products are never visible here, enforced server-side regardless of
+  query params
+- Vendor/admin "managed" endpoints under `/products/manage`: a vendor's
+  `vendor` scope is forced server-side to their own id no matter what a
+  request sends, and every mutation re-checks ownership via a pure,
+  unit-tested `canManageProduct` rule — a super admin bypasses it for
+  moderation, nothing else does
+- Variant/SKU sub-resource endpoints (add/update/remove) so pricing and
+  stock changes don't require re-submitting an entire product
+- Frontend: real product listing/detail pages replacing the Phase-1
+  placeholders, a vendor product management UI (list + create form +
+  per-variant edit/add/remove wired to the real sub-resource endpoints,
+  not a single form pretending they're one write), and an admin
+  moderation UI (publish/archive/delete across every vendor) plus category
+  CRUD
+- 37 new unit/integration tests (60 total passing) covering slug
+  generation, price-range computation, the ownership rule, the
+  filter/sort query builders, and validator edge cases (negative price,
+  zero variants, oversized page size, disallowed sort values)
+
+## Phase 4 preview — Vendor Management
+
+- A dedicated `Vendor` collection (storefront metadata, KYC documents,
+  approval status, payout details) — `Product.vendor` currently points at
+  `User` directly (see `Product.model.js` comments); Phase 4 repoints it
+  at `Vendor._id` once that collection exists, a one-line service change
+  since `Vendor.user` stays a 1:1 pointer to the same `User`
+- Vendor registration/application → admin approval/rejection workflow
+- Vendor public storefront profile pages
+- Vendor revenue/analytics groundwork (real numbers arrive with orders in
+  Phase 7, but the dashboard shell built in Phase 1 gets wired to
+  something real)
+- Admin vendor-approval queue (the `/admin/vendors` placeholder from
+  Phases 1–3 becomes a real screen)
 
 ## Beyond Phase 11 — future improvements
 

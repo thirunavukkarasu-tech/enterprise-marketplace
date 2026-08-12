@@ -1,12 +1,16 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer, { sessionCleared, bootstrapSession } from '../features/auth/authSlice';
+import productReducer from '../features/catalog/productSlice';
+import categoryReducer from '../features/catalog/categorySlice';
 import { configureAuthBridge } from '../services/apiClient';
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
-    // Phase 3+: cart, catalog, vendor, notifications slices mount here as
-    // they're built — each domain owns its own slice file under
+    products: productReducer,
+    categories: categoryReducer,
+    // Phase 4+: vendor, cart, notifications slices mount here as they're
+    // built — each domain owns its own slice file under
     // src/features/<domain>/.
   },
 });

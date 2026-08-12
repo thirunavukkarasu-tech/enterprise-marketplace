@@ -5,8 +5,8 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 2 of 11 complete — foundation, design system, and full
-> authentication/RBAC. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
+> **Status**: Phase 3 of 11 complete — foundation, authentication/RBAC,
+> and full product & category management. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
 
 ## Overview
 
@@ -89,8 +89,10 @@ See the storefront home page for it in context.
 
 ## Screenshots
 
-_Screenshots added once the storefront and dashboards have real data
-flowing through them (Phase 3+) — Phase 1 is layout shells only._
+_Screenshots added once the storefront has real seed/demo catalog data to
+show, not empty states — the product listing, detail, and management UIs
+are functionally complete as of Phase 3, but this repo doesn't ship
+seeded product images to photograph._
 
 ## Local setup
 
@@ -144,14 +146,18 @@ npm test
 ```
 
 This runs the full unit test suite (JWT signing/verification, token
-hashing, Zod validators, RBAC middleware — no database required) plus the
-Phase 1 health-check integration tests. The Phase 2 **auth integration
-suite** (full register → login → refresh-rotation → logout flow, reuse
-detection, etc.) needs a real MongoDB connection and is skipped by
-default; to run it:
+hashing, Zod validators, RBAC middleware, slug generation, price-range
+computation, the product ownership rule, and the search/filter/sort query
+builders — 59 tests, no database required) plus the Phase 1 health-check
+integration test. Two further integration suites need a real MongoDB
+connection and are skipped by default: the Phase 2 **auth flow** (register
+→ login → refresh-rotation → logout, reuse detection) and the Phase 3
+**product/category RBAC and ownership flow** (cross-vendor access denial,
+duplicate-SKU rejection, draft-product visibility). To run either:
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/products.test.js
 ```
 
 It creates its own isolated database and drops it when finished.

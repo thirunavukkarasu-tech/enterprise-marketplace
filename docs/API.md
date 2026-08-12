@@ -166,6 +166,100 @@ Requires `Authorization: Bearer <accessToken>`.
 
 ---
 
+## Categories
+
+Base path: `/categories`. Reads are public; writes require `super_admin`.
+
+### `GET /categories`
+Query: `?tree=true` returns a nested parent/children structure instead of
+a flat list; `?includeInactive=true` includes disabled categories
+(admin UIs pass this, the public storefront doesn't).
+
+```json
+{ "success": true, "data": { "categories": [ { "_id": "...", "name": "Electronics", "slug": "electronics", "parent": null, "isActive": true } ] } }
+```
+
+### `GET /categories/:slug`
+Public single-category lookup by slug. `404` if not found.
+
+### `POST /categories` — `super_admin` only
+```json
+{ "name": "Electronics", "description": "optional", "parent": null }
+```
+`201` on success. `400` if `parent` is set but doesn't exist.
+
+### `PATCH /categories/:id` — `super_admin` only
+Partial update — any subset of `name`, `description`, `parent`, `image`, `isActive`.
+
+### `DELETE /categories/:id` — `super_admin` only
+`409 Conflict` if the category still has subcategories or products — reassign or remove those first. This is a deliberate guard against orphaning products with a dangling category reference.
+
+---
+
+## Products
+
+Base path: `/products`. Public browsing lives at the root; vendor/admin
+management lives under `/products/manage` (registered first in the router
+specifically so `/manage` is never swallowed as a `:slug` value).
+
+### `GET /products` — public
+Only ever returns `status: active` products, regardless of query params.
+
+Query params: `q` (text search), `category` (ObjectId), `minPrice`,
+`maxPrice`, `sort` (`newest` | `price_asc` | `price_desc` | `rating` |
+`title_asc`, default `newest`), `page` (default `1`), `limit` (default
+`20`, max `60`).
+
+```json
+{ "success": true, "data": { "products": [ { "...": "..." } ] }, "meta": { "page": 1, "limit": 20, "total": 42, "totalPages": 3 } }
+```
+
+### `GET /products/:slug` — public
+`404` unless the product exists **and** is `active` — a vendor's own
+draft is invisible here even to that vendor; they view drafts through
+`/products/manage/:id` instead.
+
+### `GET /products/manage` — `vendor` or `super_admin`
+Same filters as the public list, plus `status` and (admin-only) `vendor`.
+**A vendor's `vendor` scope is always forced to their own id server-side**
+— the query param is ignored/overridden for that role, never trusted.
+Admins may optionally filter by `vendor` to inspect one seller's catalog.
+
+### `GET /products/manage/:id` — `vendor` (own) or `super_admin`
+`403` if a vendor requests a product they don't own.
+
+### `POST /products/manage` — `vendor` only
+Admins moderate existing listings rather than creating products on a
+vendor's behalf, so this is vendor-only, not `vendorOrAdmin`.
+
+```json
+{
+  "title": "Bluetooth Speaker",
+  "category": "<categoryId>",
+  "description": "optional",
+  "status": "draft",
+  "variants": [{ "sku": "SPK-001", "price": 49.99, "stock": 25, "attributes": { "color": "Black" } }]
+}
+```
+`201` on success. `409` if any SKU is already in use **anywhere in the
+catalog** — SKUs are globally unique, not just unique per product.
+
+### `PATCH /products/manage/:id` — `vendor` (own) or `super_admin`
+Partial update of `title`, `description`, `category`, `images`, `status`.
+Does not touch variants — see the variant sub-resource routes below.
+
+### `DELETE /products/manage/:id` — `vendor` (own) or `super_admin`
+
+### Variant / SKU sub-resource — `vendor` (own) only
+- `POST /products/manage/:id/variants` — add a variant. `409` on a duplicate SKU.
+- `PATCH /products/manage/:id/variants/:variantId` — update price/stock/attributes/sku.
+- `DELETE /products/manage/:id/variants/:variantId` — `400` if it's the product's last remaining variant (delete the product instead).
+
+Every variant mutation recomputes the product's denormalized
+`priceRange.{min,max}` before saving.
+
+---
+
 ## `GET /health`
 
 Unauthenticated. Returns process uptime and current MongoDB connection state — see `README.md` for the full URL.
@@ -174,7 +268,7 @@ Unauthenticated. Returns process uptime and current MongoDB connection state —
 
 ## Coming in later phases
 
-Product, vendor, order, cart, coupon, review, delivery, and analytics
-endpoints are added as their respective phases ship (see
-`docs/ROADMAP.md`). This document grows alongside them rather than being
-written speculatively ahead of the code that implements each route.
+Vendor, order, cart, coupon, review, delivery, and analytics endpoints are
+added as their respective phases ship (see `docs/ROADMAP.md`). This
+document grows alongside them rather than being written speculatively
+ahead of the code that implements each route.
