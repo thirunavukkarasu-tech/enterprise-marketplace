@@ -52,7 +52,7 @@ than from swappable persistence — YAGNI applies.
 |---|---|
 | Auth/session | `middleware/auth.js` (Phase 2), JWT access token + httpOnly refresh cookie |
 | Authorization | `middleware/rbac.js` (Phase 2), role check per route |
-| Validation | `validators/*.schema.js`, Zod schemas run before the controller |
+| Validation | `validators/*.validator.js`, Zod schemas run before the controller |
 | Error handling | `middleware/errorHandler.js` — the only place that writes an error response |
 | Response shape | `utils/ApiResponse.js` — every success response goes through it |
 | Logging | `config/logger.js` (Winston) — structured, used by both request logs and audit logs |

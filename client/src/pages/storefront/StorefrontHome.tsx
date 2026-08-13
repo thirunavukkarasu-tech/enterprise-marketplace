@@ -1,5 +1,4 @@
 import { ShoppingBag, Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody } from '../../components/ui/Card';
 import { DirectoryStrip } from '../../components/common/DirectoryStrip';
@@ -21,11 +20,9 @@ export function StorefrontHome() {
             real order tracking, and a marketplace built to scale past the first hundred sellers.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <Link to="/products">
-              <Button size="lg">
-                <ShoppingBag size={18} /> Browse products
-              </Button>
-            </Link>
+            <Button size="lg">
+              <ShoppingBag size={18} /> Browse products
+            </Button>
             <Button size="lg" variant="secondary">
               Become a vendor
             </Button>

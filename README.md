@@ -5,8 +5,9 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 3 of 11 complete — foundation, authentication/RBAC,
-> and full product & category management. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
+> **Status**: Phase 2 of 11 complete — foundation, plus full
+> authentication & RBAC. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
+> what's next.
 
 ## Overview
 
@@ -42,11 +43,11 @@ Full write-ups: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 routes → controllers (thin) → services (business logic) → models
 ```
 
-Controllers stay thin; business logic (order splitting across vendors,
-inventory reservation, coupon validation) lives in services. Every error
-funnels through one centralized handler; every success response uses the
-same `{ success, message, data }` envelope. Auth and authorization are
-enforced server-side only.
+Controllers stay thin; business logic (auth session management, and
+order splitting/inventory reservation/coupon validation as those domains
+are built) lives in services. Every error funnels through one centralized
+handler; every success response uses the same `{ success, message, data }`
+envelope. Auth and authorization are enforced server-side only.
 
 ## Tech stack
 
@@ -57,8 +58,7 @@ enforced server-side only.
 
 **Security** — JWT access tokens · refresh token rotation with reuse
 detection · httpOnly cookies · bcrypt · RBAC · Helmet · CORS ·
-express-rate-limit · Zod validation · centralized error handling · audit
-logging
+express-rate-limit · Zod validation · centralized error handling
 
 **Infra** — MongoDB Atlas · Redis (optional) · Cloudinary/S3-style storage
 abstraction · Vercel (frontend) · Render/Railway (backend)
@@ -89,10 +89,8 @@ See the storefront home page for it in context.
 
 ## Screenshots
 
-_Screenshots added once the storefront has real seed/demo catalog data to
-show, not empty states — the product listing, detail, and management UIs
-are functionally complete as of Phase 3, but this repo doesn't ship
-seeded product images to photograph._
+_Screenshots added once there's real seed/demo catalog data to show, not
+empty states — that starts arriving with the Phase 3 product catalog._
 
 ## Local setup
 
@@ -146,18 +144,16 @@ npm test
 ```
 
 This runs the full unit test suite (JWT signing/verification, token
-hashing, Zod validators, RBAC middleware, slug generation, price-range
-computation, the product ownership rule, and the search/filter/sort query
-builders — 59 tests, no database required) plus the Phase 1 health-check
-integration test. Two further integration suites need a real MongoDB
-connection and are skipped by default: the Phase 2 **auth flow** (register
-→ login → refresh-rotation → logout, reuse detection) and the Phase 3
-**product/category RBAC and ownership flow** (cross-vendor access denial,
-duplicate-SKU rejection, draft-product visibility). To run either:
+hashing, duration parsing, Zod validators, RBAC middleware — 20 tests, no
+database required) plus the Phase 1 health-check integration tests (2
+tests). A further integration suite covers the full auth flow (register
+→ login → refresh-rotation → logout, reuse detection, generic error
+messages, deactivated-user rejection) but needs a real MongoDB connection
+and is skipped by default in environments without one (shows as 1
+skip-notice test in the count, 23 total):
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
-TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/products.test.js
 ```
 
 It creates its own isolated database and drops it when finished.
@@ -196,7 +192,7 @@ GET http://localhost:5000/api/v1/health
 - **Database** → MongoDB Atlas
 
 Deployment steps and environment configuration are documented in full once
-Phase 11 wires up CI/CD — Phase 1 is intentionally local-first.
+Phase 11 wires up CI/CD — the project is intentionally local-first until then.
 
 ## Future improvements
 

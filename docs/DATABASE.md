@@ -65,7 +65,7 @@ documents, and payout details are meaningless for the other three roles —
 keeping them apart avoids a User schema full of nullable vendor-only
 fields.
 
-### Product — **implemented in Phase 3** (this section is the as-built design, not the original speculative plan)
+### Product — **planned for Phase 3** (design decided now, not yet built)
 ```
 Product {
   _id
@@ -80,31 +80,32 @@ Product {
   createdAt / updatedAt
 }
 ```
-Indexes: `{ vendor: 1, status: 1 }` (vendor's own product list), `{ category: 1, status: 1 }` (category browsing), `{ status: 1, 'priceRange.min': 1 }` (storefront price sort), text index on `{ title, description }` (search), unique index on `variants.sku` (global SKU uniqueness — Mongo enforces this across every document, not just within one product, because a unique index on an array field path is multikey).
+Planned indexes: `{ vendor: 1, status: 1 }` (vendor's own product list), `{ category: 1, status: 1 }` (category browsing), `{ status: 1, 'priceRange.min': 1 }` (storefront price sort), text index on `{ title, description }` (search), unique index on `variants.sku` (global SKU uniqueness — a unique index on an array field path is multikey in Mongo, so this is enforced across every document, not just within one product).
 
-Two decisions worth calling out that weren't obvious from the original Phase 1 plan:
+Two decisions worth calling out ahead of building it:
 
-- **`vendor` references `User`, not `Vendor`.** The dedicated `Vendor`
-  collection (storefront metadata, approval status, payout details)
-  doesn't exist until Phase 4 — building Product in Phase 3 meant either
-  blocking on Phase 4 or pointing at what actually exists today. Every
-  vendor-scoping check in the app compares this field against
-  `req.user.id`, so Phase 4 repointing it at `Vendor._id` is a one-line
-  service change, not a data migration — `Vendor.user` will still be a
-  1:1 pointer back to the same `User`.
-- **`priceRange.{min,max}` is denormalized**, recomputed by
-  `productService`/`pricing.js` on every create/update/variant change.
-  Sorting or filtering a storefront listing by price without this would
-  mean unwinding the `variants` array on every query — cheap to keep in
-  sync, expensive to compute on the fly at listing scale.
-- **`reservedStock` exists on every variant now, always `0`.** Nothing
-  reserves stock yet — checkout doesn't exist until Phase 6/7. Adding the
-  field later would mean a migration touching every existing product;
-  defining it now costs nothing and keeps the schema stable once orders
-  start writing to it. `availableStock` (`stock - reservedStock`) is
-  never stored — always derived, so it can't drift from its inputs.
+- **`vendor` will reference `User`, not `Vendor`.** The dedicated `Vendor`
+  collection (storefront metadata, approval status, payout details) isn't
+  built until Phase 4 — building Product in Phase 3 means either blocking
+  on Phase 4 or pointing at what exists at that point (`User`, since every
+  vendor already has one from Phase 2's registration flow). Every
+  vendor-scoping check would compare this field against `req.user.id`, so
+  repointing it at `Vendor._id` in Phase 4 is planned to be a one-line
+  service change, not a data migration — `Vendor.user` would stay a 1:1
+  pointer back to the same `User`.
+- **`priceRange.{min,max}` will be denormalized**, recomputed on every
+  create/update/variant change. Sorting or filtering a storefront listing
+  by price without this would mean unwinding the `variants` array on
+  every query — cheap to keep in sync, expensive to compute on the fly at
+  listing scale.
+- **`reservedStock` will exist on every variant from the start, always
+  `0` until checkout exists.** Adding the field later would mean a
+  migration touching every existing product; defining it now costs
+  nothing and keeps the schema stable once orders start writing to it in
+  Phase 7. `availableStock` (`stock - reservedStock`) is planned to always
+  be derived, never stored, so it can't drift from its inputs.
 
-### Category — **implemented in Phase 3**
+### Category — **planned for Phase 3**
 ```
 Category {
   _id
@@ -117,14 +118,15 @@ Category {
 }
 ```
 Self-referencing `parent` gives one collection both top-level categories
-and subcategories without a separate model. Kept flat (not a nested
-embedded tree) so categories can be queried/paginated/moderated like any
-other collection — the tree shape needed for storefront navigation is
-assembled from a flat list in the service layer, which is cheap at
-marketplace-category scale (tens to a few hundred documents). Deleting a
-category is blocked (`409`) if it still has subcategories or products,
-rather than cascading — an accidental delete shouldn't silently orphan a
-product's category reference.
+and subcategories without a separate model. Planned to stay flat (not a
+nested embedded tree) so categories can be queried/paginated/moderated
+like any other collection — the tree shape needed for storefront
+navigation would be assembled from a flat list in the service layer,
+which is cheap at marketplace-category scale (tens to a few hundred
+documents). Deleting a category is planned to be blocked (`409`) if it
+still has subcategories or products, rather than cascading — an
+accidental delete shouldn't silently orphan a product's category
+reference.
 
 ### Order
 ```
