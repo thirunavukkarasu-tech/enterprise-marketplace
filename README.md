@@ -5,9 +5,9 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 2 of 11 complete — foundation, plus full
-> authentication & RBAC. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
-> what's next.
+> **Status**: Phase 3 of 11 complete — foundation, authentication & RBAC,
+> plus product & category management. See [`docs/ROADMAP.md`](docs/ROADMAP.md)
+> for what's next.
 
 ## Overview
 
@@ -68,7 +68,7 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 | Domain | Phase |
 |---|---|
 | Auth, sessions, RBAC | 2 ✅ |
-| Product & category catalog | 3 |
+| Product & category catalog | 3 ✅ |
 | Vendor onboarding & approval | 4 |
 | Customer browsing, search, wishlist | 5 |
 | Cart & checkout | 6 |
@@ -90,7 +90,9 @@ See the storefront home page for it in context.
 ## Screenshots
 
 _Screenshots added once there's real seed/demo catalog data to show, not
-empty states — that starts arriving with the Phase 3 product catalog._
+empty states — the product/category screens are built as of Phase 3, this
+just needs seed data (a demo catalog seed is a good candidate to add
+alongside the Phase 4 vendor seed data)._
 
 ## Local setup
 
@@ -144,19 +146,25 @@ npm test
 ```
 
 This runs the full unit test suite (JWT signing/verification, token
-hashing, duration parsing, Zod validators, RBAC middleware — 20 tests, no
-database required) plus the Phase 1 health-check integration tests (2
-tests). A further integration suite covers the full auth flow (register
-→ login → refresh-rotation → logout, reuse detection, generic error
-messages, deactivated-user rejection) but needs a real MongoDB connection
-and is skipped by default in environments without one (shows as 1
-skip-notice test in the count, 23 total):
+hashing, duration parsing, Zod validators, RBAC middleware, slugify/
+unique-slug generation, product ownership rules, product/category
+validators — 50 tests, no database required) plus the health-check
+integration tests (2 tests). Three further integration suites need a real
+MongoDB connection and are skipped by default in environments without one
+(shown as 3 skip-notice tests in the count, 55 total): the full auth flow
+(register → login → refresh-rotation → logout, reuse detection, generic
+error messages, deactivated-user rejection), category management (cycle
+prevention, deletion guards, active-only public listing), and product
+management (cross-vendor ownership enforcement, SKU uniqueness, status
+transitions, public visibility rules):
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/categories.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/products.test.js
 ```
 
-It creates its own isolated database and drops it when finished.
+Each suite creates its own isolated database and drops it when finished.
 
 ## Environment variables
 
@@ -174,10 +182,12 @@ Versioned under `/api/v1`. Every response follows:
 { "success": true, "message": "...", "data": { ... } }
 ```
 
-Full reference for the authentication endpoints (register, login, logout,
-refresh, forgot/reset password, email verification, `/me`) is in
-[`docs/API.md`](docs/API.md). Product, vendor, order, and other domain
-endpoints are added there as their phases ship.
+Full reference for authentication (register, login, logout, refresh,
+forgot/reset password, email verification, `/me`) and for category/
+product management (public storefront listing/search/filtering, and the
+vendor/admin managed endpoints with ownership enforcement) is in
+[`docs/API.md`](docs/API.md). Vendor, order, and other domain endpoints
+are added there as their phases ship.
 
 ## Health check
 

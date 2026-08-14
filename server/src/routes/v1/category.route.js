@@ -9,16 +9,21 @@ import {
   createCategorySchema,
   updateCategorySchema,
   categoryIdParamSchema,
-  listCategoriesQuerySchema,
 } from '../../validators/category.validator.js';
 
 const router = Router();
 
-// ── Public ───────────────────────────────────────────────────────────────
-router.get('/', validate(listCategoriesQuerySchema), asyncHandler(categoryController.list));
-router.get('/:slug', asyncHandler(categoryController.getBySlug));
+// ── public ───────────────────────────────────────────────────────────────
+router.get('/', asyncHandler(categoryController.list));
+router.get('/:id', validate(categoryIdParamSchema), asyncHandler(categoryController.getById));
 
-// ── Admin-only management ──────────────────────────────────────────────
+// ── admin only ───────────────────────────────────────────────────────────
+router.get(
+  '/manage/all',
+  requireAuth,
+  requireRole(ROLES.SUPER_ADMIN),
+  asyncHandler(categoryController.listManaged)
+);
 router.post(
   '/',
   requireAuth,
@@ -26,7 +31,6 @@ router.post(
   validate(createCategorySchema),
   asyncHandler(categoryController.create)
 );
-
 router.patch(
   '/:id',
   requireAuth,
@@ -34,7 +38,6 @@ router.patch(
   validate(updateCategorySchema),
   asyncHandler(categoryController.update)
 );
-
 router.delete(
   '/:id',
   requireAuth,

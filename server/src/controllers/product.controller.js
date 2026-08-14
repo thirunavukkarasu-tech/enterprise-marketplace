@@ -1,15 +1,11 @@
-import { productService } from '../services/product.service.js';
+import { productService } from '../services/productService.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 
-function paginatedResponse({ items, total, page, limit, totalPages }, message) {
-  return new ApiResponse(200, { products: items }, message, { page, limit, total, totalPages });
-}
-
 export const productController = {
-  // ── Public storefront ────────────────────────────────────────────────
+  // ── public ───────────────────────────────────────────────────────────
   async listPublic(req, res) {
-    const result = await productService.listPublic(req.query);
-    paginatedResponse(result).send(res);
+    const { items, ...meta } = await productService.listPublic(req.query);
+    new ApiResponse(200, { products: items }, 'Success', meta).send(res);
   },
 
   async getPublicBySlug(req, res) {
@@ -17,45 +13,49 @@ export const productController = {
     new ApiResponse(200, { product }).send(res);
   },
 
-  // ── Vendor / admin management ───────────────────────────────────────
+  // ── managed (vendor + admin) ────────────────────────────────────────
   async listManaged(req, res) {
-    const result = await productService.listManaged({ user: req.user, ...req.query });
-    paginatedResponse(result).send(res);
+    const { items, ...meta } = await productService.listManaged(req.user, req.query);
+    new ApiResponse(200, { products: items }, 'Success', meta).send(res);
   },
 
   async getManagedById(req, res) {
-    const product = await productService.getManagedById(req.params.id, req.user);
+    const product = await productService.getManagedById(req.user, req.params.id);
     new ApiResponse(200, { product }).send(res);
   },
 
   async create(req, res) {
-    const product = await productService.create({ vendorId: req.user.id, ...req.body });
+    const product = await productService.create(req.user, req.body);
     new ApiResponse(201, { product }, 'Product created').send(res);
   },
 
   async update(req, res) {
-    const product = await productService.update(req.params.id, req.user, req.body);
+    const product = await productService.update(req.user, req.params.id, req.body);
     new ApiResponse(200, { product }, 'Product updated').send(res);
   },
 
+  async updateStatus(req, res) {
+    const product = await productService.updateStatus(req.user, req.params.id, req.body.status);
+    new ApiResponse(200, { product }, 'Product status updated').send(res);
+  },
+
   async remove(req, res) {
-    await productService.delete(req.params.id, req.user);
+    await productService.remove(req.user, req.params.id);
     new ApiResponse(200, null, 'Product deleted').send(res);
   },
 
-  // ── Variant / SKU sub-resource ──────────────────────────────────────
   async addVariant(req, res) {
-    const product = await productService.addVariant(req.params.id, req.user, req.body);
+    const product = await productService.addVariant(req.user, req.params.id, req.body);
     new ApiResponse(201, { product }, 'Variant added').send(res);
   },
 
   async updateVariant(req, res) {
-    const product = await productService.updateVariant(req.params.id, req.params.variantId, req.user, req.body);
+    const product = await productService.updateVariant(req.user, req.params.id, req.params.sku, req.body);
     new ApiResponse(200, { product }, 'Variant updated').send(res);
   },
 
   async removeVariant(req, res) {
-    const product = await productService.removeVariant(req.params.id, req.params.variantId, req.user);
+    const product = await productService.removeVariant(req.user, req.params.id, req.params.sku);
     new ApiResponse(200, { product }, 'Variant removed').send(res);
   },
 };

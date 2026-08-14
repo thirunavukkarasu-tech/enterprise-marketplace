@@ -1,141 +1,148 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ImageOff, ChevronLeft, PackageCheck, PackageX } from 'lucide-react';
+import { ImageOff, ChevronLeft } from 'lucide-react';
 import { productApi } from '../../features/catalog/productApi';
 import type { Product, ProductVariant } from '../../types/catalog';
 import { Spinner } from '../../components/common/Spinner';
 import { ErrorState } from '../../components/common/ErrorState';
+import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { cn } from '../../utils/cn';
 
-function formatPrice(value: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+function formatPrice(amount: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
+
+type Status = 'loading' | 'success' | 'error' | 'not-found';
 
 export function ProductDetail() {
   const { slug } = useParams<{ slug: string }>();
   const [product, setProduct] = useState<Product | null>(null);
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
-  const [status, setStatus] = useState<'loading' | 'succeeded' | 'failed'>('loading');
+  const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
+  const [selectedSku, setSelectedSku] = useState<string | null>(null);
 
-  const load = () => {
+  useEffect(() => {
     if (!slug) return;
     setStatus('loading');
     productApi
       .getPublicBySlug(slug)
-      .then((data) => {
-        setProduct(data);
-        setSelectedVariant(data.variants[0] ?? null);
-        setStatus('succeeded');
+      .then((p) => {
+        setProduct(p);
+        setSelectedSku(p.variants[0]?.sku ?? null);
+        setStatus('success');
       })
       .catch((err) => {
-        const anyErr = err as { response?: { data?: { message?: string } } };
-        setError(anyErr.response?.data?.message ?? 'This product could not be found.');
-        setStatus('failed');
+        const anyErr = err as { response?: { status?: number; data?: { message?: string } } };
+        if (anyErr.response?.status === 404) {
+          setStatus('not-found');
+        } else {
+          setError(anyErr.response?.data?.message ?? 'Failed to load this product.');
+          setStatus('error');
+        }
       });
-  };
-
-  useEffect(load, [slug]);
+  }, [slug]);
 
   if (status === 'loading') {
     return (
-      <div className="flex justify-center py-24">
+      <div className="flex min-h-[50vh] items-center justify-center">
         <Spinner />
       </div>
     );
   }
 
-  if (status === 'failed' || !product) {
+  if (status === 'not-found') {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-16">
-        <ErrorState message={error ?? 'This product could not be found.'} onRetry={load} />
+      <div className="mx-auto max-w-xl px-6 py-20 text-center">
+        <h1 className="text-lg font-semibold text-ink">Product not found</h1>
+        <p className="mt-1 text-sm text-slate">It may have been removed or is no longer available.</p>
+        <Link to="/products" className="mt-4 inline-block text-sm font-medium text-indigo-600 hover:underline">
+          Back to shop
+        </Link>
       </div>
     );
   }
 
-  const image = product.images[0];
+  if (status === 'error' || !product) {
+    return (
+      <div className="mx-auto max-w-xl px-6 py-20">
+        <ErrorState message={error ?? 'Something went wrong.'} />
+      </div>
+    );
+  }
+
+  const variant: ProductVariant | undefined =
+    product.variants.find((v) => v.sku === selectedSku) ?? product.variants[0];
+  const categoryName = typeof product.category === 'string' ? undefined : product.category.name;
+  const cover = product.images[0];
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
       <Link to="/products" className="mb-6 inline-flex items-center gap-1 text-sm text-slate hover:text-ink">
-        <ChevronLeft size={15} /> Back to shop
+        <ChevronLeft size={16} /> Back to shop
       </Link>
 
       <div className="grid gap-10 md:grid-cols-2">
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-slate-100">
-          {image ? (
-            <img src={image.url} alt={image.alt || product.title} className="h-full w-full object-cover" />
+        <div className="flex aspect-square items-center justify-center rounded-lg bg-slate-100">
+          {cover ? (
+            <img src={cover.url} alt={cover.alt ?? product.title} className="h-full w-full rounded-lg object-cover" />
           ) : (
-            <ImageOff className="text-slate" size={40} />
+            <ImageOff className="text-slate" size={36} />
           )}
         </div>
 
         <div>
-          <p className="text-sm text-slate">{product.category.name}</p>
-          <h1 className="mt-1 text-2xl font-semibold text-ink">{product.title}</h1>
-          <p className="mt-1 text-sm text-slate">Sold by {product.vendor.name}</p>
+          {categoryName && <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate">{categoryName}</p>}
+          <h1 className="text-2xl font-semibold text-ink">{product.title}</h1>
 
-          {selectedVariant && (
-            <div className="mt-4 flex items-baseline gap-2">
-              <span className="font-mono text-2xl font-semibold text-ink">
-                {formatPrice(selectedVariant.price)}
-              </span>
-              {selectedVariant.compareAtPrice && selectedVariant.compareAtPrice > selectedVariant.price && (
-                <span className="font-mono text-sm text-slate line-through">
-                  {formatPrice(selectedVariant.compareAtPrice)}
-                </span>
+          {variant && (
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="font-mono text-xl font-semibold text-ink">{formatPrice(variant.price)}</span>
+              {variant.compareAtPrice && variant.compareAtPrice > variant.price && (
+                <span className="font-mono text-sm text-slate line-through">{formatPrice(variant.compareAtPrice)}</span>
               )}
             </div>
           )}
 
+          <p className="mt-4 text-sm leading-relaxed text-ink-soft">{product.description}</p>
+
           {product.variants.length > 1 && (
-            <div className="mt-5">
+            <div className="mt-6">
               <p className="mb-2 text-sm font-medium text-ink-soft">Options</p>
               <div className="flex flex-wrap gap-2">
-                {product.variants.map((variant) => (
+                {product.variants.map((v) => (
                   <button
-                    key={variant._id}
-                    onClick={() => setSelectedVariant(variant)}
+                    key={v.sku}
+                    type="button"
+                    onClick={() => setSelectedSku(v.sku)}
+                    disabled={v.availableStock === 0}
                     className={cn(
-                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                      selectedVariant?._id === variant._id
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 text-ink-soft hover:border-indigo-300'
+                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                      v.sku === selectedSku ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-ink-soft hover:border-indigo-300'
                     )}
                   >
-                    {Object.values(variant.attributes).join(' / ') || variant.sku}
+                    {v.attributes ? Object.values(v.attributes).join(' / ') : v.sku}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="mt-5 flex items-center gap-2 text-sm">
-            {selectedVariant && selectedVariant.availableStock > 0 ? (
-              <>
-                <PackageCheck size={16} className="text-emerald-500" />
-                <span className="text-emerald-600">In stock ({selectedVariant.availableStock} available)</span>
-              </>
+          <div className="mt-6 flex items-center gap-3">
+            {variant && variant.availableStock === 0 ? (
+              <Badge tone="coral">Out of stock</Badge>
+            ) : variant && variant.availableStock <= 5 ? (
+              <Badge tone="marigold">Only {variant.availableStock} left</Badge>
             ) : (
-              <>
-                <PackageX size={16} className="text-coral-500" />
-                <span className="text-coral-600">Out of stock</span>
-              </>
+              <Badge tone="emerald">In stock</Badge>
             )}
+            <span className="font-mono text-xs text-slate">SKU: {variant?.sku}</span>
           </div>
 
-          <Button size="lg" className="mt-6 w-full sm:w-auto" disabled={!selectedVariant || selectedVariant.availableStock === 0}>
+          <Button size="lg" className="mt-6" disabled={!variant || variant.availableStock === 0}>
             Add to cart
           </Button>
-          <p className="mt-2 text-xs text-slate">Cart and checkout ship in Phase 6.</p>
-
-          {product.description && (
-            <div className="mt-8 border-t border-slate-200 pt-6">
-              <h2 className="mb-2 text-sm font-semibold text-ink">Description</h2>
-              <p className="whitespace-pre-line text-sm text-ink-soft">{product.description}</p>
-            </div>
-          )}
+          <p className="mt-2 text-xs text-slate">Cart and checkout arrive in Phase 6.</p>
         </div>
       </div>
     </div>

@@ -1,14 +1,5 @@
 import mongoose from 'mongoose';
 
-/**
- * Self-referencing `parent` gives one collection both top-level categories
- * and subcategories without a separate Subcategory model — a subcategory
- * is just a Category whose `parent` is set. Kept flat (no nested embedded
- * tree) so categories can be queried, paginated, and moderated like any
- * other collection; the tree shape is assembled in the service layer from
- * a flat list, which is cheap at marketplace-category scale (tens to a
- * few hundred documents, not millions).
- */
 const categorySchema = new mongoose.Schema(
   {
     name: {
@@ -29,16 +20,18 @@ const categorySchema = new mongoose.Schema(
       type: String,
       trim: true,
       maxlength: 500,
-      default: '',
     },
+    // Self-referencing: one collection serves both top-level categories
+    // and subcategories. See docs/DATABASE.md for why this stays flat
+    // rather than an embedded tree.
     parent: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
       default: null,
     },
     image: {
-      url: { type: String, default: null },
-      alt: { type: String, default: '' },
+      url: { type: String },
+      alt: { type: String },
     },
     isActive: {
       type: Boolean,
@@ -48,7 +41,8 @@ const categorySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-categorySchema.index({ parent: 1, isActive: 1 });
+categorySchema.index({ parent: 1 });
+categorySchema.index({ isActive: 1 });
 
 categorySchema.set('toJSON', {
   transform: (_doc, ret) => {

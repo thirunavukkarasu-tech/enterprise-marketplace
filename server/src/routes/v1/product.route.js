@@ -8,89 +8,89 @@ import { ROLES } from '../../constants/roles.js';
 import {
   createProductSchema,
   updateProductSchema,
+  updateProductStatusSchema,
   productIdParamSchema,
   addVariantSchema,
   updateVariantSchema,
-  variantParamsSchema,
+  variantParamSchema,
   listPublicProductsQuerySchema,
   listManagedProductsQuerySchema,
+  productSlugParamSchema,
 } from '../../validators/product.validator.js';
 
 const router = Router();
 
-const vendorOrAdmin = requireRole(ROLES.VENDOR, ROLES.SUPER_ADMIN);
+const canManage = requireRole(ROLES.VENDOR, ROLES.SUPER_ADMIN);
 
-// ── Vendor / admin management — registered before the public "/:slug"
-// route so "/manage" is never swallowed as a slug value. ────────────────
+// ── public storefront ──────────────────────────────────────────────────
+// Registered before /manage and /:id-shaped managed routes so a slug like
+// "manage" could never be ambiguous — but note the managed routes below
+// all live under the distinct /manage prefix specifically to avoid any
+// collision with public slug lookups.
+router.get('/', validate(listPublicProductsQuerySchema), asyncHandler(productController.listPublic));
+router.get('/slug/:slug', validate(productSlugParamSchema), asyncHandler(productController.getPublicBySlug));
+
+// ── vendor / admin management ──────────────────────────────────────────
+// Every route below requires auth + (vendor or super_admin) at the route
+// level, AND an ownership check inside productService for anything that
+// touches a specific product id — see docs/SECURITY.md §2.
 router.get(
   '/manage',
   requireAuth,
-  vendorOrAdmin,
+  canManage,
   validate(listManagedProductsQuerySchema),
   asyncHandler(productController.listManaged)
 );
-
 router.get(
   '/manage/:id',
   requireAuth,
-  vendorOrAdmin,
+  canManage,
   validate(productIdParamSchema),
   asyncHandler(productController.getManagedById)
 );
-
-router.post(
-  '/manage',
-  requireAuth,
-  requireRole(ROLES.VENDOR), // admins moderate existing listings; they don't create products on a vendor's behalf
-  validate(createProductSchema),
-  asyncHandler(productController.create)
-);
-
+router.post('/manage', requireAuth, canManage, validate(createProductSchema), asyncHandler(productController.create));
 router.patch(
   '/manage/:id',
   requireAuth,
-  vendorOrAdmin,
+  canManage,
   validate(updateProductSchema),
   asyncHandler(productController.update)
 );
-
+router.patch(
+  '/manage/:id/status',
+  requireAuth,
+  canManage,
+  validate(updateProductStatusSchema),
+  asyncHandler(productController.updateStatus)
+);
 router.delete(
   '/manage/:id',
   requireAuth,
-  vendorOrAdmin,
+  canManage,
   validate(productIdParamSchema),
   asyncHandler(productController.remove)
 );
 
-// Variant/SKU management — vendor-owned pricing and stock, not an admin
-// moderation action, so scoped to the vendor role (ownership against the
-// specific product is still enforced in productService either way).
 router.post(
   '/manage/:id/variants',
   requireAuth,
-  requireRole(ROLES.VENDOR),
+  canManage,
   validate(addVariantSchema),
   asyncHandler(productController.addVariant)
 );
-
 router.patch(
-  '/manage/:id/variants/:variantId',
+  '/manage/:id/variants/:sku',
   requireAuth,
-  requireRole(ROLES.VENDOR),
+  canManage,
   validate(updateVariantSchema),
   asyncHandler(productController.updateVariant)
 );
-
 router.delete(
-  '/manage/:id/variants/:variantId',
+  '/manage/:id/variants/:sku',
   requireAuth,
-  requireRole(ROLES.VENDOR),
-  validate(variantParamsSchema),
+  canManage,
+  validate(variantParamSchema),
   asyncHandler(productController.removeVariant)
 );
-
-// ── Public storefront ────────────────────────────────────────────────────
-router.get('/', validate(listPublicProductsQuerySchema), asyncHandler(productController.listPublic));
-router.get('/:slug', asyncHandler(productController.getPublicBySlug));
 
 export default router;

@@ -1,17 +1,13 @@
 import mongoose from 'mongoose';
-import { ALL_PRODUCT_STATUSES, PRODUCT_STATUS } from '../constants/product.js';
+import { PRODUCT_STATUS, ALL_PRODUCT_STATUSES } from '../constants/product.js';
 
 /**
- * Variants are embedded on Product (not a separate collection) — see
- * docs/DATABASE.md: a variant is meaningless outside its parent product
- * and is always read/written together with it. `stock` and
- * `reservedStock` are both present now even though nothing reserves stock
- * yet (checkout doesn't exist until Phase 6/7) — adding `reservedStock`
- * later would mean a schema migration touching every existing product;
- * defining it now costs nothing and keeps this model stable once orders
- * start writing to it. `availableStock` is never stored — it's always
- * derived (`stock - reservedStock`) so it can never drift out of sync
- * with its inputs.
+ * A real sub-schema (not a plain object literal) so it can carry its own
+ * virtual — `availableStock` is always derived from `stock - reservedStock`,
+ * never stored, so it can't drift from its inputs. `reservedStock` exists
+ * now, always `0`, even though nothing writes to it until checkout exists
+ * (Phase 6/7) — adding the field later would mean a migration touching
+ * every existing product.
  */
 const variantSchema = new mongoose.Schema(
   {
@@ -20,15 +16,12 @@ const variantSchema = new mongoose.Schema(
       required: [true, 'SKU is required'],
       trim: true,
       uppercase: true,
+      maxlength: 50,
     },
     attributes: {
-      // Free-form key/value pairs (e.g. { color: 'Black', size: 'M' }).
-      // A fixed schema per category (e.g. requiring "size" for apparel)
-      // is a Phase-4+ category-attribute-template concern — out of scope
-      // for the core variant model.
       type: Map,
       of: String,
-      default: {},
+      default: undefined, // e.g. { size: 'M', color: 'Red' }
     },
     price: {
       type: Number,
@@ -38,13 +31,6 @@ const variantSchema = new mongoose.Schema(
     compareAtPrice: {
       type: Number,
       min: [0, 'Compare-at price cannot be negative'],
-      default: null,
-      validate: {
-        validator: function validateCompareAtPrice(value) {
-          return value == null || value >= this.price;
-        },
-        message: 'Compare-at price must be greater than or equal to price',
-      },
     },
     stock: {
       type: Number,
@@ -56,30 +42,21 @@ const variantSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: [0, 'Reserved stock cannot be negative'],
-      default: 0, // stays 0 until Phase 7 order/checkout reserves against it
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
+      default: 0,
     },
   },
-  { _id: true, timestamps: false }
+  { _id: false, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
 variantSchema.virtual('availableStock').get(function availableStock() {
-  return Math.max(0, this.stock - this.reservedStock);
+  return this.stock - this.reservedStock;
 });
-variantSchema.set('toJSON', { virtuals: true });
 
 const productSchema = new mongoose.Schema(
   {
-    // References User directly (not a Vendor document) because the
-    // dedicated Vendor collection — storefront metadata, approval status,
-    // payout details — doesn't exist until Phase 4. Ownership checks in
-    // productService compare this against req.user.id today; Phase 4
-    // repoints this at Vendor._id once that collection exists, which is
-    // a one-line service change, not a data-model rewrite (Vendor.user
-    // will still be a 1:1 pointer back to the same User).
+    // References User, not a dedicated Vendor document — the Vendor
+    // collection doesn't exist until Phase 4. See docs/DATABASE.md for
+    // why this is a one-line service change later, not a migration.
     vendor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -88,14 +65,20 @@ const productSchema = new mongoose.Schema(
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Category',
-      required: [true, 'Category is required'],
+      required: true,
     },
     title: {
       type: String,
       required: [true, 'Title is required'],
       trim: true,
-      minlength: 3,
-      maxlength: 150,
+      minlength: 2,
+      maxlength: 200,
+    },
+    description: {
+      type: String,
+      required: [true, 'Description is required'],
+      trim: true,
+      maxlength: 5000,
     },
     slug: {
       type: String,
@@ -104,37 +87,32 @@ const productSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    description: {
-      type: String,
-      trim: true,
-      maxlength: 5000,
-      default: '',
+    variants: {
+      type: [variantSchema],
+      validate: {
+        validator: (v) => Array.isArray(v) && v.length > 0,
+        message: 'A product must have at least one variant',
+      },
     },
     images: {
       type: [
         {
           url: { type: String, required: true },
-          alt: { type: String, default: '' },
+          alt: { type: String },
+          _id: false,
         },
       ],
       default: [],
-    },
-    variants: {
-      type: [variantSchema],
-      validate: {
-        validator: (arr) => Array.isArray(arr) && arr.length > 0,
-        message: 'A product must have at least one variant',
-      },
     },
     status: {
       type: String,
       enum: ALL_PRODUCT_STATUSES,
       default: PRODUCT_STATUS.DRAFT,
     },
-    // Denormalized min/max across variants — kept in sync by
-    // productService on every create/update. Exists so listing/sorting/
-    // filtering by price doesn't require unwinding the variants array on
-    // every query; that's the whole point of denormalizing it.
+    // Denormalized from variants[].price on every create/update/variant
+    // mutation — see productService.recomputePriceRange. Lets storefront
+    // listing sort/filter by price without unwinding variants on every
+    // query.
     priceRange: {
       min: { type: Number, default: 0 },
       max: { type: Number, default: 0 },
@@ -145,12 +123,11 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ── Indexes — each one exists for a specific query this module makes ──
-productSchema.index({ vendor: 1, status: 1 }); // vendor's own product list
-productSchema.index({ category: 1, status: 1 }); // category browsing
-productSchema.index({ status: 1, 'priceRange.min': 1 }); // storefront sort-by-price
-productSchema.index({ title: 'text', description: 'text' }); // search
-productSchema.index({ 'variants.sku': 1 }, { unique: true }); // global SKU uniqueness
+productSchema.index({ vendor: 1, status: 1 });
+productSchema.index({ category: 1, status: 1 });
+productSchema.index({ status: 1, 'priceRange.min': 1 });
+productSchema.index({ 'variants.sku': 1 }, { unique: true });
+productSchema.index({ title: 'text', description: 'text' });
 
 productSchema.set('toJSON', {
   virtuals: true,

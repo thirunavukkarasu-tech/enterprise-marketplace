@@ -1,110 +1,83 @@
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Search } from 'lucide-react';
-import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
-import { fetchPublicProducts } from '../../features/catalog/productSlice';
-import { fetchCategories } from '../../features/catalog/categorySlice';
-import { ProductCard } from '../../components/catalog/ProductCard';
+import { useState } from 'react';
+import { Search, PackageSearch } from 'lucide-react';
+import { useProducts } from '../../hooks/useProducts';
+import { useCategories } from '../../hooks/useCategories';
+import { ProductCard } from '../../components/product/ProductCard';
+import { Pagination } from '../../components/ui/Pagination';
 import { Spinner } from '../../components/common/Spinner';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ErrorState } from '../../components/common/ErrorState';
-import { Pagination } from '../../components/ui/Pagination';
 import { Input } from '../../components/ui/Input';
-import type { ProductSort } from '../../types/catalog';
+import type { ProductListQuery, ProductSort } from '../../types/catalog';
 
-const sortOptions: { value: ProductSort; label: string }[] = [
+const SORT_OPTIONS: { value: ProductSort; label: string }[] = [
   { value: 'newest', label: 'Newest' },
-  { value: 'price_asc', label: 'Price: Low to High' },
-  { value: 'price_desc', label: 'Price: High to Low' },
-  { value: 'rating', label: 'Top Rated' },
-  { value: 'title_asc', label: 'Name: A–Z' },
+  { value: 'price_asc', label: 'Price: low to high' },
+  { value: 'price_desc', label: 'Price: high to low' },
+  { value: 'rating', label: 'Top rated' },
 ];
 
 export function ProductListing() {
-  const dispatch = useAppDispatch();
-  const { items, meta, status, error } = useAppSelector((state) => state.products.public);
-  const categories = useAppSelector((state) => state.categories.items);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState<ProductListQuery>({ page: 1, limit: 12 });
+  const [searchInput, setSearchInput] = useState('');
 
-  const q = searchParams.get('q') ?? '';
-  const category = searchParams.get('category') ?? '';
-  const sort = (searchParams.get('sort') as ProductSort) ?? 'newest';
-  const page = Number(searchParams.get('page') ?? '1');
+  const { categories } = useCategories();
+  const { products, meta, status, error, refetch } = useProducts(query);
 
-  const [qInput, setQInput] = useState(q);
-
-  useEffect(() => {
-    dispatch(fetchCategories({}));
-  }, [dispatch]);
-
-  useEffect(() => {
-    dispatch(
-      fetchPublicProducts({
-        q: q || undefined,
-        category: category || undefined,
-        sort,
-        page,
-        limit: 20,
-      })
-    );
-  }, [dispatch, q, category, sort, page]);
-
-  const updateParams = (updates: Record<string, string>) => {
-    const next = new URLSearchParams(searchParams);
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value) next.set(key, value);
-      else next.delete(key);
-    });
-    if (!('page' in updates)) next.delete('page'); // reset pagination on any filter change
-    setSearchParams(next);
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setQuery((q) => ({ ...q, q: searchInput || undefined, page: 1 }));
   };
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="mb-6 text-2xl font-semibold">Shop all products</h1>
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold">Shop</h1>
+        <p className="text-sm text-slate">Browse listings from every vendor on MarketSphere.</p>
+      </header>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          updateParams({ q: qInput });
-        }}
-        className="mb-6 flex flex-wrap items-center gap-3"
-      >
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate" size={16} />
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <form onSubmit={submitSearch} className="flex max-w-sm flex-1 gap-2">
           <Input
-            value={qInput}
-            onChange={(e) => setQInput(e.target.value)}
             placeholder="Search products…"
-            className="pl-9"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            aria-label="Search products"
           />
+          <button type="submit" className="flex h-10 w-10 items-center justify-center rounded-md bg-indigo-500 text-white">
+            <Search size={16} />
+          </button>
+        </form>
+
+        <div className="flex gap-2">
+          <select
+            value={query.category ?? ''}
+            onChange={(e) => setQuery((q) => ({ ...q, category: e.target.value || undefined, page: 1 }))}
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-ink-soft"
+            aria-label="Filter by category"
+          >
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c._id} value={c._id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={query.sort ?? 'newest'}
+            onChange={(e) => setQuery((q) => ({ ...q, sort: e.target.value as ProductSort, page: 1 }))}
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-ink-soft"
+            aria-label="Sort products"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
-
-        <select
-          value={category}
-          onChange={(e) => updateParams({ category: e.target.value })}
-          className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-ink-soft"
-        >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={sort}
-          onChange={(e) => updateParams({ sort: e.target.value })}
-          className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-ink-soft"
-        >
-          {sortOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </form>
+      </div>
 
       {status === 'loading' && (
         <div className="flex justify-center py-20">
@@ -112,32 +85,26 @@ export function ProductListing() {
         </div>
       )}
 
-      {status === 'failed' && (
-        <ErrorState
-          message={error ?? 'Failed to load products.'}
-          onRetry={() => dispatch(fetchPublicProducts({ q, category, sort, page, limit: 20 }))}
-        />
-      )}
+      {status === 'error' && <ErrorState message={error ?? 'Something went wrong.'} onRetry={refetch} />}
 
-      {status === 'succeeded' && items.length === 0 && (
+      {status === 'success' && products.length === 0 && (
         <EmptyState
+          icon={PackageSearch}
           title="No products found"
-          description="Try a different search term, category, or clear your filters."
+          description="Try a different search term or clear your filters."
         />
       )}
 
-      {status === 'succeeded' && items.length > 0 && (
+      {status === 'success' && products.length > 0 && (
         <>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {items.map((product) => (
+            {products.map((product) => (
               <ProductCard key={product._id} product={product} />
             ))}
           </div>
-          {meta && (
-            <div className="mt-6">
-              <Pagination meta={meta} onPageChange={(p) => updateParams({ page: String(p) })} />
-            </div>
-          )}
+          <div className="mt-8">
+            <Pagination meta={meta} onPageChange={(page) => setQuery((q) => ({ ...q, page }))} />
+          </div>
         </>
       )}
     </div>

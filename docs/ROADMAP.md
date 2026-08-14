@@ -6,8 +6,8 @@
 |---|---|---|
 | 1 | Foundation & architecture | ✅ Complete |
 | 2 | Authentication & RBAC | ✅ Complete |
-| 3 | Product & category management | ⏳ Next |
-| 4 | Vendor management | Planned |
+| 3 | Product & category management | ✅ Complete |
+| 4 | Vendor management | ⏳ Next |
 | 5 | Customer shopping experience | Planned |
 | 6 | Cart & checkout | Planned |
 | 7 | Orders, inventory & payments | Planned |
@@ -32,25 +32,47 @@
   role-based access on `/admin`, `/vendor`, `/delivery`, and role-aware
   navigation (sign-in/sign-out, dashboard links)
 - Demo/seed users for all four roles (`npm run seed`)
-- 23 passing unit tests (tokens, validators, RBAC middleware, duration
-  parsing) + a full integration suite for the auth flow (register→login→
-  refresh rotation→logout, reuse detection, generic error messages,
-  deactivated-user rejection) — written and ready to run against a real
+
+## Phase 3 summary — Product & Category Management (complete)
+
+- `Category` model — self-referencing `parent` for subcategories,
+  cycle-checked on every reassignment, admin-only writes, public reads
+  (active-only), deletion blocked if it still has subcategories or
+  products
+- `Product` model — embedded variants/SKUs (globally unique), denormalized
+  `priceRange` recomputed on every mutation, `draft`/`active`/`archived`
+  status, `reservedStock` field defined now (always `0`) ahead of Phase
+  7's checkout so no later migration is needed
+- Resource-level ownership (`canManageProduct`, `utils/ownership.js`) —
+  new on top of Phase 2's role-only RBAC: a vendor can only view/edit/
+  delete their own products, enforced in the service layer, not just
+  hidden in the UI; a vendor's `?vendor=` query filter is always
+  overwritten server-side, never trusted from the request
+- Public storefront endpoints: full-text search, category/price
+  filtering, sorting, pagination — draft/archived products are `404`, not
+  filtered-and-hidden, on the public detail route
+- Frontend: real product listing/detail pages (replacing the Phase 1
+  placeholders), a vendor product management UI (list, create, edit,
+  status control, delete) with a dynamic variant editor, an admin
+  moderation UI (cross-vendor listing, archive/restore), and admin
+  category CRUD
+- 30 new passing unit tests (slugify, ownership rules, product/category
+  Zod validators — pricing, SKU format, pagination bounds) + full
+  integration suites for both categories and products (ownership
+  enforcement, cycle prevention, SKU conflicts, status transitions,
+  public visibility rules) — written and ready to run against a real
   MongoDB instance; see `README.md` for how
 
-## Phase 3 preview — Product & Category Management
+## Phase 4 preview — Vendor Management
 
-- `Category` model (self-referencing `parent` for subcategories, admin-only
-  writes, public reads) and `Product` model (embedded variants/SKUs,
-  denormalized price range for efficient sort/filter)
-- Public storefront endpoints: search, category/price filtering, sorting,
-  pagination — draft/archived products never visible regardless of query
-- Vendor "managed" endpoints scoped so a vendor can only see/edit their
-  own products, with a super-admin moderation bypass — this resource-level
-  ownership check is new in Phase 3 (Phase 2's RBAC only answers "can this
-  role call this route," not "does this user own this specific resource")
-- Frontend: real product listing/detail pages replacing the Phase 1
-  placeholders, vendor product management UI, admin moderation UI
+- A dedicated `Vendor` model (storefront metadata, approval status,
+  documents, payout details) — `Product.vendor` is planned to repoint
+  from `User` to `Vendor._id` as a one-line service change, not a
+  migration (see `docs/DATABASE.md`)
+- Vendor registration/application and admin approval/rejection workflow
+- Vendor public storefront profile pages
+- Vendor revenue/analytics dashboard foundation (real data arrives with
+  orders in Phase 7 — the dashboard shell already exists from Phase 1)
 
 ## Beyond Phase 11 — future improvements
 

@@ -1,5 +1,5 @@
 import { createBrowserRouter } from 'react-router-dom';
-import { LayoutDashboard, Store, Boxes, ShoppingCart, Users, Settings } from 'lucide-react';
+import { LayoutDashboard, Store, Boxes, ShoppingCart, Users, Settings, FolderTree } from 'lucide-react';
 
 import { StorefrontLayout } from '../layouts/StorefrontLayout';
 import { DashboardLayout } from '../layouts/DashboardLayout';
@@ -7,8 +7,14 @@ import { DeliveryLayout } from '../layouts/DeliveryLayout';
 import { AuthLayout } from '../layouts/AuthLayout';
 
 import { StorefrontHome } from '../pages/storefront/StorefrontHome';
+import { ProductListing } from '../pages/storefront/ProductListing';
+import { ProductDetail } from '../pages/storefront/ProductDetail';
 import { AdminOverview } from '../pages/admin/AdminOverview';
+import { AdminProducts } from '../pages/admin/AdminProducts';
+import { AdminCategories } from '../pages/admin/AdminCategories';
 import { VendorOverview } from '../pages/vendor/VendorOverview';
+import { VendorProducts } from '../pages/vendor/VendorProducts';
+import { VendorProductForm } from '../pages/vendor/VendorProductForm';
 import { DeliveryActive } from '../pages/delivery/DeliveryActive';
 import { PlaceholderPage } from '../components/common/PlaceholderPage';
 import { Unauthorized } from '../pages/Unauthorized';
@@ -25,6 +31,7 @@ const adminNav = [
   { to: '/admin', label: 'Overview', icon: LayoutDashboard },
   { to: '/admin/vendors', label: 'Vendors', icon: Store },
   { to: '/admin/products', label: 'Products', icon: Boxes },
+  { to: '/admin/categories', label: 'Categories', icon: FolderTree },
   { to: '/admin/orders', label: 'Orders', icon: ShoppingCart },
   { to: '/admin/customers', label: 'Customers', icon: Users },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
@@ -43,6 +50,8 @@ export const router = createBrowserRouter([
     element: <StorefrontLayout />,
     children: [
       { index: true, element: <StorefrontHome /> },
+      { path: 'products', element: <ProductListing /> },
+      { path: 'products/:slug', element: <ProductDetail /> },
       { path: 'categories', element: <PlaceholderPage title="Categories" phase="Phase 3" /> },
       { path: 'vendors', element: <PlaceholderPage title="Vendor directory" phase="Phase 4" /> },
       { path: 'cart', element: <PlaceholderPage title="Cart" phase="Phase 6" /> },
@@ -70,7 +79,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <AdminOverview /> },
       { path: 'vendors', element: <PlaceholderPage title="Vendor approvals" phase="Phase 4" /> },
-      { path: 'products', element: <PlaceholderPage title="Product moderation" phase="Phase 3" /> },
+      { path: 'products', element: <AdminProducts /> },
+      { path: 'categories', element: <AdminCategories /> },
       { path: 'orders', element: <PlaceholderPage title="Order monitoring" phase="Phase 7" /> },
       { path: 'customers', element: <PlaceholderPage title="Customer management" phase="Phase 4" /> },
       { path: 'settings', element: <PlaceholderPage title="System settings" phase="Phase 10" /> },
@@ -85,7 +95,9 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <VendorOverview /> },
-      { path: 'products', element: <PlaceholderPage title="Product management" phase="Phase 3" /> },
+      { path: 'products', element: <VendorProducts /> },
+      { path: 'products/new', element: <VendorProductForm /> },
+      { path: 'products/:id/edit', element: <VendorProductForm /> },
       { path: 'orders', element: <PlaceholderPage title="Vendor orders" phase="Phase 7" /> },
       { path: 'settings', element: <PlaceholderPage title="Vendor profile" phase="Phase 4" /> },
     ],

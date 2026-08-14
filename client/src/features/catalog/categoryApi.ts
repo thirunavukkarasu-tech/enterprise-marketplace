@@ -8,22 +8,32 @@ interface Envelope<T> {
 }
 
 export const categoryApi = {
-  async list(params: { tree?: boolean; includeInactive?: boolean } = {}) {
-    const res = await apiClient.get<Envelope<{ categories: Category[] }>>('/categories', { params });
+  /** Public: active categories only. */
+  async list() {
+    const res = await apiClient.get<Envelope<{ categories: Category[] }>>('/categories');
     return res.data.data.categories;
   },
 
-  async getBySlug(slug: string) {
-    const res = await apiClient.get<Envelope<{ category: Category }>>(`/categories/${slug}`);
+  /** Admin-only: every category, active or not. */
+  async listManaged() {
+    const res = await apiClient.get<Envelope<{ categories: Category[] }>>('/categories/manage/all');
+    return res.data.data.categories;
+  },
+
+  async getById(id: string) {
+    const res = await apiClient.get<Envelope<{ category: Category }>>(`/categories/${id}`);
     return res.data.data.category;
   },
 
-  async create(payload: { name: string; description?: string; parent?: string | null }) {
+  async create(payload: { name: string; description?: string; parent?: string | null; image?: { url: string; alt?: string } }) {
     const res = await apiClient.post<Envelope<{ category: Category }>>('/categories', payload);
     return res.data.data.category;
   },
 
-  async update(id: string, payload: Partial<{ name: string; description: string; parent: string | null; isActive: boolean }>) {
+  async update(
+    id: string,
+    payload: Partial<{ name: string; description: string; parent: string | null; image: { url: string; alt?: string }; isActive: boolean }>
+  ) {
     const res = await apiClient.patch<Envelope<{ category: Category }>>(`/categories/${id}`, payload);
     return res.data.data.category;
   },

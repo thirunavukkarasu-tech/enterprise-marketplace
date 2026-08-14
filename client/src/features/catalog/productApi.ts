@@ -1,13 +1,5 @@
 import { apiClient } from '../../services/apiClient';
-import type {
-  CreateProductInput,
-  ManagedProductFilters,
-  PaginationMeta,
-  Product,
-  PublicProductFilters,
-  UpdateProductInput,
-  VariantInput,
-} from '../../types/catalog';
+import type { PaginationMeta, Product, ProductInput, ProductListQuery, ProductStatus } from '../../types/catalog';
 
 interface Envelope<T> {
   success: boolean;
@@ -21,25 +13,31 @@ interface ProductListResult {
   meta: PaginationMeta;
 }
 
-async function unwrapList(promise: Promise<{ data: Envelope<{ products: Product[] }> }>): Promise<ProductListResult> {
-  const res = await promise;
-  return { products: res.data.data.products, meta: res.data.meta! };
+function toQueryString(query: ProductListQuery = {}): string {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  });
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 export const productApi = {
-  // ── Public storefront ──────────────────────────────────────────────
-  listPublic(filters: PublicProductFilters) {
-    return unwrapList(apiClient.get('/products', { params: filters }));
+  /** Public storefront listing — always active-only, enforced server-side. */
+  async listPublic(query?: ProductListQuery): Promise<ProductListResult> {
+    const res = await apiClient.get<Envelope<{ products: Product[] }>>(`/products${toQueryString(query)}`);
+    return { products: res.data.data.products, meta: res.data.meta as PaginationMeta };
   },
 
   async getPublicBySlug(slug: string) {
-    const res = await apiClient.get<Envelope<{ product: Product }>>(`/products/${slug}`);
+    const res = await apiClient.get<Envelope<{ product: Product }>>(`/products/slug/${slug}`);
     return res.data.data.product;
   },
 
-  // ── Vendor / admin management ─────────────────────────────────────
-  listManaged(filters: ManagedProductFilters) {
-    return unwrapList(apiClient.get('/products/manage', { params: filters }));
+  /** Vendor sees only their own products; admin may pass `vendor` to filter any. */
+  async listManaged(query?: ProductListQuery): Promise<ProductListResult> {
+    const res = await apiClient.get<Envelope<{ products: Product[] }>>(`/products/manage${toQueryString(query)}`);
+    return { products: res.data.data.products, meta: res.data.meta as PaginationMeta };
   },
 
   async getManagedById(id: string) {
@@ -47,13 +45,18 @@ export const productApi = {
     return res.data.data.product;
   },
 
-  async create(payload: CreateProductInput) {
+  async create(payload: ProductInput) {
     const res = await apiClient.post<Envelope<{ product: Product }>>('/products/manage', payload);
     return res.data.data.product;
   },
 
-  async update(id: string, payload: UpdateProductInput) {
+  async update(id: string, payload: Partial<ProductInput>) {
     const res = await apiClient.patch<Envelope<{ product: Product }>>(`/products/manage/${id}`, payload);
+    return res.data.data.product;
+  },
+
+  async updateStatus(id: string, status: ProductStatus) {
+    const res = await apiClient.patch<Envelope<{ product: Product }>>(`/products/manage/${id}/status`, { status });
     return res.data.data.product;
   },
 
@@ -61,24 +64,18 @@ export const productApi = {
     await apiClient.delete(`/products/manage/${id}`);
   },
 
-  // ── Variant / SKU sub-resource ────────────────────────────────────
-  async addVariant(productId: string, payload: VariantInput) {
-    const res = await apiClient.post<Envelope<{ product: Product }>>(`/products/manage/${productId}/variants`, payload);
+  async addVariant(id: string, variant: ProductInput['variants'][number]) {
+    const res = await apiClient.post<Envelope<{ product: Product }>>(`/products/manage/${id}/variants`, variant);
     return res.data.data.product;
   },
 
-  async updateVariant(productId: string, variantId: string, payload: Partial<VariantInput>) {
-    const res = await apiClient.patch<Envelope<{ product: Product }>>(
-      `/products/manage/${productId}/variants/${variantId}`,
-      payload
-    );
+  async updateVariant(id: string, sku: string, payload: Partial<ProductInput['variants'][number]>) {
+    const res = await apiClient.patch<Envelope<{ product: Product }>>(`/products/manage/${id}/variants/${sku}`, payload);
     return res.data.data.product;
   },
 
-  async removeVariant(productId: string, variantId: string) {
-    const res = await apiClient.delete<Envelope<{ product: Product }>>(
-      `/products/manage/${productId}/variants/${variantId}`
-    );
+  async removeVariant(id: string, sku: string) {
+    const res = await apiClient.delete<Envelope<{ product: Product }>>(`/products/manage/${id}/variants/${sku}`);
     return res.data.data.product;
   },
 };

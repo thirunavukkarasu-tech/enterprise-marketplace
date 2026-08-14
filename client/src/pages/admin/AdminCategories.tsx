@@ -1,84 +1,129 @@
-import { useEffect, useState } from 'react';
-import { Trash2, Plus } from 'lucide-react';
-import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
-import { fetchCategories, categoriesInvalidated } from '../../features/catalog/categorySlice';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Plus, FolderTree, Trash2, X } from 'lucide-react';
+import { useCategories } from '../../hooks/useCategories';
 import { categoryApi } from '../../features/catalog/categoryApi';
-import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { FormField } from '../../components/common/FormField';
+import { Card, CardBody } from '../../components/ui/Card';
+import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/common/Spinner';
-import { ErrorState } from '../../components/common/ErrorState';
 import { EmptyState } from '../../components/common/EmptyState';
+import { ErrorState } from '../../components/common/ErrorState';
+
+const categoryFormSchema = z.object({
+  name: z.string().trim().min(2, 'At least 2 characters').max(100),
+  description: z.string().trim().max(500).optional(),
+  parent: z.string().optional(),
+});
+
+type CategoryForm = z.infer<typeof categoryFormSchema>;
 
 export function AdminCategories() {
-  const dispatch = useAppDispatch();
-  const { items, status, error } = useAppSelector((state) => state.categories);
-  const [name, setName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { categories, status, error, refetch } = useCategories({ managed: true });
+  const [showForm, setShowForm] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
 
-  const load = () => dispatch(fetchCategories({ includeInactive: true }));
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<CategoryForm>({ resolver: zodResolver(categoryFormSchema) });
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setCreating(true);
-    setFormError(null);
+  const onSubmit = async (values: CategoryForm) => {
+    setServerError(null);
     try {
-      await categoryApi.create({ name: name.trim() });
-      setName('');
-      dispatch(categoriesInvalidated());
-      load();
+      await categoryApi.create({
+        name: values.name,
+        description: values.description || undefined,
+        parent: values.parent || null,
+      });
+      reset();
+      setShowForm(false);
+      refetch();
     } catch (err) {
       const anyErr = err as { response?: { data?: { message?: string } } };
-      setFormError(anyErr.response?.data?.message ?? 'Failed to create category.');
-    } finally {
-      setCreating(false);
+      setServerError(anyErr.response?.data?.message ?? 'Could not create this category.');
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this category? This fails if it still has products or subcategories.')) return;
-    setDeletingId(id);
+  const toggleActive = async (id: string, isActive: boolean) => {
+    setRowError(null);
+    try {
+      await categoryApi.update(id, { isActive: !isActive });
+      refetch();
+    } catch (err) {
+      const anyErr = err as { response?: { data?: { message?: string } } };
+      setRowError(anyErr.response?.data?.message ?? 'Could not update this category.');
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete "${name}"? This only works if it has no subcategories or products.`)) return;
+    setRowError(null);
     try {
       await categoryApi.remove(id);
-      dispatch(categoriesInvalidated());
-      load();
+      refetch();
     } catch (err) {
       const anyErr = err as { response?: { data?: { message?: string } } };
-      alert(anyErr.response?.data?.message ?? 'Failed to delete category.');
-    } finally {
-      setDeletingId(null);
+      setRowError(anyErr.response?.data?.message ?? 'Could not delete this category.');
     }
   };
+
+  const parentName = (parentId: string | null) => categories.find((c) => c._id === parentId)?.name;
 
   return (
     <div className="p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold">Categories</h1>
-        <p className="text-sm text-slate">Manage the categories vendors list products under.</p>
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Categories</h1>
+          <p className="text-sm text-slate">Organize the marketplace catalog.</p>
+        </div>
+        <Button onClick={() => setShowForm((v) => !v)}>
+          {showForm ? <X size={16} /> : <Plus size={16} />}
+          {showForm ? 'Cancel' : 'New category'}
+        </Button>
       </header>
 
-      <Card className="mb-6">
-        <form onSubmit={handleCreate} className="flex items-end gap-3 p-5">
-          <div className="flex-1">
-            <label htmlFor="category-name" className="mb-1.5 block text-sm font-medium text-ink-soft">
-              New category name
-            </label>
-            <Input id="category-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Home & Living" />
-          </div>
-          <Button type="submit" disabled={creating}>
-            <Plus size={15} /> {creating ? 'Adding…' : 'Add category'}
-          </Button>
-        </form>
-        {formError && <p className="px-5 pb-4 text-sm text-coral-600">{formError}</p>}
-      </Card>
+      {showForm && (
+        <Card className="mb-6">
+          <CardBody>
+            <form onSubmit={handleSubmit(onSubmit)} noValidate className="grid gap-4 sm:grid-cols-3">
+              <FormField label="Name" htmlFor="name">
+                <Input id="name" error={errors.name?.message} {...register('name')} />
+              </FormField>
+              <FormField label="Parent (optional)" htmlFor="parent">
+                <select id="parent" className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm" {...register('parent')}>
+                  <option value="">None (top-level)</option>
+                  {categories.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Description (optional)" htmlFor="description">
+                <Input id="description" {...register('description')} />
+              </FormField>
+              {serverError && (
+                <p className="col-span-full rounded-md bg-coral-100 px-3 py-2 text-sm text-coral-600">{serverError}</p>
+              )}
+              <div className="col-span-full flex justify-end">
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Creating…' : 'Create category'}
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      )}
+
+      {rowError && <p className="mb-4 rounded-md bg-coral-100 px-3 py-2 text-sm text-coral-600">{rowError}</p>}
 
       {status === 'loading' && (
         <div className="flex justify-center py-16">
@@ -86,41 +131,50 @@ export function AdminCategories() {
         </div>
       )}
 
-      {status === 'failed' && <ErrorState message={error ?? 'Failed to load categories.'} onRetry={load} />}
+      {status === 'error' && <ErrorState message={error ?? 'Something went wrong.'} onRetry={refetch} />}
 
-      {status === 'succeeded' && items.length === 0 && <EmptyState title="No categories yet" />}
+      {status === 'success' && categories.length === 0 && (
+        <EmptyState icon={FolderTree} title="No categories yet" description="Create one to start organizing products." />
+      )}
 
-      {status === 'succeeded' && items.length > 0 && (
-        <Card>
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate">
+      {status === 'success' && categories.length > 0 && (
+        <Card className="overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 bg-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate">
               <tr>
                 <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Slug</th>
+                <th className="px-4 py-3">Parent</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {items.map((category) => (
-                <tr key={category._id} className="border-b border-slate-100 last:border-0">
+            <tbody className="divide-y divide-slate-200">
+              {categories.map((category) => (
+                <tr key={category._id}>
                   <td className="px-4 py-3 font-medium text-ink">{category.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate">{category.slug}</td>
+                  <td className="px-4 py-3 text-ink-soft">{parentName(category.parent) ?? '—'}</td>
                   <td className="px-4 py-3">
-                    <span className={category.isActive ? 'text-emerald-600' : 'text-slate'}>
-                      {category.isActive ? 'Active' : 'Inactive'}
-                    </span>
+                    <Badge tone={category.isActive ? 'emerald' : 'neutral'}>
+                      {category.isActive ? 'active' : 'inactive'}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={deletingId === category._id}
-                        onClick={() => handleDelete(category._id)}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(category._id, category.isActive)}
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-ink-soft hover:bg-slate-100"
                       >
-                        <Trash2 size={14} className="text-coral-600" />
-                      </Button>
+                        {category.isActive ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(category._id, category.name)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-coral-600 hover:bg-coral-100"
+                        aria-label="Delete category"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>

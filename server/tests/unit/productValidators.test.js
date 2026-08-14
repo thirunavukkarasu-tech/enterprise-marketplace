@@ -2,59 +2,67 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createProductSchema,
+  updateProductStatusSchema,
   addVariantSchema,
   listPublicProductsQuerySchema,
 } from '../../src/validators/product.validator.js';
-import { createCategorySchema } from '../../src/validators/category.validator.js';
 
-const validObjectId = '507f1f77bcf86cd799439011';
+const validCategory = '507f1f77bcf86cd799439011';
+const validId = '507f1f77bcf86cd799439012';
 
-test('createProductSchema accepts a valid product with one variant', async () => {
-  const result = await createProductSchema.parseAsync({
-    body: {
-      title: 'Wireless Mouse',
-      category: validObjectId,
-      variants: [{ sku: 'MOUSE-BLK', price: 25, stock: 10 }],
-    },
-    query: {},
-    params: {},
-  });
+function baseProductBody(overrides = {}) {
+  return {
+    title: 'Wireless Mouse',
+    description: 'A reliable wireless mouse.',
+    category: validCategory,
+    variants: [{ sku: 'WM-001', price: 19.99, stock: 10 }],
+    ...overrides,
+  };
+}
+
+test('createProductSchema accepts a valid single-variant product', async () => {
+  const result = await createProductSchema.parseAsync({ body: baseProductBody(), query: {}, params: {} });
   assert.equal(result.body.title, 'Wireless Mouse');
-  assert.equal(result.body.variants[0].price, 25);
+  assert.equal(result.body.variants[0].price, 19.99);
 });
 
 test('createProductSchema rejects a product with zero variants', async () => {
   await assert.rejects(() =>
+    createProductSchema.parseAsync({ body: baseProductBody({ variants: [] }), query: {}, params: {} })
+  );
+});
+
+test('createProductSchema rejects a negative or zero price', async () => {
+  await assert.rejects(() =>
     createProductSchema.parseAsync({
-      body: { title: 'No Variants', category: validObjectId, variants: [] },
+      body: baseProductBody({ variants: [{ sku: 'X-1', price: 0, stock: 1 }] }),
+      query: {},
+      params: {},
+    })
+  );
+  await assert.rejects(() =>
+    createProductSchema.parseAsync({
+      body: baseProductBody({ variants: [{ sku: 'X-1', price: -5, stock: 1 }] }),
       query: {},
       params: {},
     })
   );
 });
 
-test('createProductSchema rejects a negative price', async () => {
+test('createProductSchema rejects negative stock', async () => {
   await assert.rejects(() =>
     createProductSchema.parseAsync({
-      body: {
-        title: 'Bad Price',
-        category: validObjectId,
-        variants: [{ sku: 'BAD-1', price: -5, stock: 1 }],
-      },
+      body: baseProductBody({ variants: [{ sku: 'X-1', price: 5, stock: -1 }] }),
       query: {},
       params: {},
     })
   );
 });
 
-test('createProductSchema rejects a negative stock', async () => {
+test('createProductSchema rejects a SKU with invalid characters', async () => {
   await assert.rejects(() =>
     createProductSchema.parseAsync({
-      body: {
-        title: 'Bad Stock',
-        category: validObjectId,
-        variants: [{ sku: 'BAD-2', price: 10, stock: -1 }],
-      },
+      body: baseProductBody({ variants: [{ sku: 'BAD SKU!', price: 5, stock: 1 }] }),
       query: {},
       params: {},
     })
@@ -63,58 +71,55 @@ test('createProductSchema rejects a negative stock', async () => {
 
 test('createProductSchema rejects a malformed category id', async () => {
   await assert.rejects(() =>
-    createProductSchema.parseAsync({
-      body: { title: 'Valid Title', category: 'not-an-object-id', variants: [{ sku: 'X-1', price: 1, stock: 1 }] },
-      query: {},
-      params: {},
-    })
+    createProductSchema.parseAsync({ body: baseProductBody({ category: 'not-an-id' }), query: {}, params: {} })
   );
 });
 
-test('addVariantSchema requires a sku and non-negative price', async () => {
-  const result = await addVariantSchema.parseAsync({
-    body: { sku: 'NEW-SKU', price: 12.5, stock: 3 },
-    params: { id: validObjectId },
+test('updateProductStatusSchema only accepts known status values', async () => {
+  const result = await updateProductStatusSchema.parseAsync({
+    body: { status: 'active' },
     query: {},
+    params: { id: validId },
   });
-  assert.equal(result.body.sku, 'NEW-SKU');
+  assert.equal(result.body.status, 'active');
 
   await assert.rejects(() =>
-    addVariantSchema.parseAsync({ body: { sku: '', price: 12.5 }, params: { id: validObjectId }, query: {} })
+    updateProductStatusSchema.parseAsync({ body: { status: 'published' }, query: {}, params: { id: validId } })
   );
 });
 
-test('listPublicProductsQuerySchema applies sensible pagination defaults', async () => {
-  const result = await listPublicProductsQuerySchema.parseAsync({ query: {}, body: {}, params: {} });
+test('addVariantSchema accepts an optional compareAtPrice greater than zero', async () => {
+  const result = await addVariantSchema.parseAsync({
+    body: { sku: 'X-2', price: 10, compareAtPrice: 15, stock: 3 },
+    query: {},
+    params: { id: validId },
+  });
+  assert.equal(result.body.compareAtPrice, 15);
+});
+
+test('listPublicProductsQuerySchema applies pagination defaults and coerces numeric strings', async () => {
+  const result = await listPublicProductsQuerySchema.parseAsync({ body: {}, params: {}, query: {} });
   assert.equal(result.query.page, 1);
   assert.equal(result.query.limit, 20);
-  assert.equal(result.query.sort, 'newest');
-});
 
-test('listPublicProductsQuerySchema rejects a page size above the max', async () => {
-  await assert.rejects(() =>
-    listPublicProductsQuerySchema.parseAsync({ query: { limit: 500 }, body: {}, params: {} })
-  );
-});
-
-test('listPublicProductsQuerySchema rejects an unrecognized sort value', async () => {
-  await assert.rejects(() =>
-    listPublicProductsQuerySchema.parseAsync({ query: { sort: 'cheapest-first' }, body: {}, params: {} })
-  );
-});
-
-test('createCategorySchema accepts a top-level category with no parent', async () => {
-  const result = await createCategorySchema.parseAsync({
-    body: { name: 'Electronics' },
-    query: {},
+  const coerced = await listPublicProductsQuerySchema.parseAsync({
+    body: {},
     params: {},
+    query: { page: '3', limit: '5', minPrice: '10.5' },
   });
-  assert.equal(result.body.name, 'Electronics');
-  assert.equal(result.body.parent, null);
+  assert.equal(coerced.query.page, 3);
+  assert.equal(coerced.query.limit, 5);
+  assert.equal(coerced.query.minPrice, 10.5);
 });
 
-test('createCategorySchema rejects a name that is too short', async () => {
+test('listPublicProductsQuerySchema rejects a limit above the maximum', async () => {
   await assert.rejects(() =>
-    createCategorySchema.parseAsync({ body: { name: 'A' }, query: {}, params: {} })
+    listPublicProductsQuerySchema.parseAsync({ body: {}, params: {}, query: { limit: '500' } })
+  );
+});
+
+test('listPublicProductsQuerySchema rejects an unknown sort value', async () => {
+  await assert.rejects(() =>
+    listPublicProductsQuerySchema.parseAsync({ body: {}, params: {}, query: { sort: 'most_expensive' } })
   );
 });

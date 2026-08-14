@@ -1,52 +1,53 @@
+export type ProductStatus = 'draft' | 'active' | 'archived';
+export type ProductSort = 'newest' | 'price_asc' | 'price_desc' | 'rating';
+
+export interface CategoryImage {
+  url: string;
+  alt?: string;
+}
+
+export interface Category {
+  _id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  parent: string | null;
+  image?: CategoryImage;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductVariant {
+  sku: string;
+  attributes?: Record<string, string>;
+  price: number;
+  compareAtPrice?: number;
+  stock: number;
+  reservedStock: number;
+  availableStock: number;
+}
+
+export interface ProductImage {
+  url: string;
+  alt?: string;
+}
+
 export interface CategoryRef {
   _id: string;
   name: string;
   slug: string;
 }
 
-export interface Category extends CategoryRef {
-  description: string;
-  parent: string | null;
-  image?: { url: string | null; alt: string };
-  isActive: boolean;
-  createdAt: string;
-  children?: Category[];
-}
-
-export interface VendorRef {
-  _id: string;
-  name: string;
-  email?: string;
-}
-
-export type ProductStatus = 'draft' | 'active' | 'archived';
-
-export interface ProductVariant {
-  _id: string;
-  sku: string;
-  attributes: Record<string, string>;
-  price: number;
-  compareAtPrice: number | null;
-  stock: number;
-  reservedStock: number;
-  availableStock: number;
-  isActive: boolean;
-}
-
-export interface ProductImage {
-  url: string;
-  alt: string;
-}
-
 export interface Product {
   _id: string;
-  vendor: VendorRef;
-  category: CategoryRef;
+  vendor: string;
+  category: CategoryRef | string;
   title: string;
-  slug: string;
   description: string;
-  images: ProductImage[];
+  slug: string;
   variants: ProductVariant[];
+  images: ProductImage[];
   status: ProductStatus;
   priceRange: { min: number; max: number };
   ratingAverage: number;
@@ -62,44 +63,29 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
-export type ProductSort = 'newest' | 'price_asc' | 'price_desc' | 'rating' | 'title_asc';
-
-export interface PublicProductFilters {
+export interface ProductListQuery {
   q?: string;
   category?: string;
   minPrice?: number;
   maxPrice?: number;
-  sort?: ProductSort;
-  page?: number;
-  limit?: number;
-}
-
-export interface ManagedProductFilters {
-  q?: string;
-  category?: string;
   status?: ProductStatus;
-  vendor?: string; // admin-only; ignored for vendor callers
+  vendor?: string;
   sort?: ProductSort;
   page?: number;
   limit?: number;
 }
 
-export interface VariantInput {
-  sku: string;
-  attributes?: Record<string, string>;
-  price: number;
-  compareAtPrice?: number | null;
-  stock?: number;
-  isActive?: boolean;
-}
-
-export interface CreateProductInput {
+/** Shape sent to POST /products/manage and used as the base for edits. */
+export interface ProductInput {
   title: string;
-  description?: string;
+  description: string;
   category: string;
   images?: ProductImage[];
-  variants: VariantInput[];
-  status?: ProductStatus;
+  variants: Array<{
+    sku: string;
+    attributes?: Record<string, string>;
+    price: number;
+    compareAtPrice?: number;
+    stock: number;
+  }>;
 }
-
-export type UpdateProductInput = Partial<Omit<CreateProductInput, 'variants'>>;
