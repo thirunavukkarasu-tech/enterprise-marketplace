@@ -1,9 +1,9 @@
 # Security — MarketSphere
 
-> Status note: Phases 2 (Authentication & RBAC) and 3 (Product & Category
-> Management) are implemented — §1–§4 below describe what's actually
-> running, not a plan. §8 onward remain forward-looking, as noted per
-> section.
+> Status note: Phases 2 (Authentication & RBAC), 3 (Product & Category
+> Management), and 4 (Vendor Management) are implemented — §1–§5 below
+> describe what's actually running, not a plan. §9 onward remain
+> forward-looking, as noted per section.
 
 ## 1. Authentication (Phase 2 — implemented)
 
@@ -88,7 +88,64 @@ time:
   database (not just within the request payload) on every create and
   variant addition.
 
-## 4. Input validation
+## 4. Vendor account ownership & IDOR prevention (Phase 4 — implemented)
+
+Vendor management introduces a second resource type with the same
+"role check isn't enough" problem as products, plus a self-service
+identity dimension products don't have — a vendor accessing *their own*
+account isn't just "any vendor," it's "the one specific vendor tied to
+this authenticated user."
+
+- **No `GET /vendors/:id` for vendors, at all.** The admin-only detail
+  route (`requireRole(SUPER_ADMIN)`) is the only way to fetch a vendor
+  profile by id. A vendor's own profile is served from a completely
+  separate route, `GET /vendors/me`, which never takes an id from the
+  client — it's resolved server-side from `req.user.id`. This closes the
+  IDOR path by construction: there is no route where a vendor-authenticated
+  request can supply *any* id and receive vendor data back. Contrast this
+  with product ownership (§3), where the same route (`/products/manage/:id`)
+  is shared between vendor and admin and an ownership check gates it —
+  vendor profiles use route separation instead, which is a stronger
+  guarantee than a runtime check for a resource a user should never be
+  able to address by someone else's id in the first place.
+- **The same route separation applies to writes.** `PATCH /vendors/me`
+  updates the caller's own profile; there is no `PATCH /vendors/:id` for
+  self-service — only the admin lifecycle actions
+  (`/approve`/`/reject`/`/suspend`/`/reactivate`/`/verify`) take an `:id`,
+  and all five require `super_admin`.
+- **A vendor cannot approve, reject, suspend, reactivate, or verify any
+  vendor profile — including their own.** This is enforced twice:
+  route-level (`requireRole(SUPER_ADMIN)` rejects a vendor-role token
+  with `403` before any handler code runs), and defensively inside
+  `vendorService.approve` (a same-account check that can't currently be
+  reached through the API, but is kept explicit because "a vendor can
+  never approve themselves" is a stated business rule, not just an
+  implementation detail of how routes happen to be wired today).
+- **Mass assignment is prevented in two independent layers**, the same
+  pattern established for products in Phase 3: the Zod schemas for
+  onboarding/self-update (`createVendorSchema`, `updateVendorSchema`)
+  simply have no field for `status`, `isVerified`, `reviewedBy/At`,
+  `rejectionReason`, `suspensionReason`, or `user` — Zod strips unknown
+  keys by default, so these never reach the service layer. Independently,
+  `vendorService` writes through an explicit `SELF_EDITABLE_FIELDS`
+  allow-list (`applyFields(doc, payload, allowedFields)`), never
+  `Object.assign(vendor, req.body)` or `findByIdAndUpdate(id, req.body)`
+  — a validator bug alone couldn't cause a privilege escalation here, the
+  service layer would still refuse to write an unlisted field.
+- **The `GET /vendors` admin list never leaks credentials.** It populates
+  the linked `User` document but explicitly selects only `name email
+  isActive` (`vendorRepository.findById`/`list`) — never the
+  `passwordHash` or refresh-token data, even though populate operates at
+  the driver level and doesn't automatically inherit the User schema's
+  `toJSON` transform the way a plain `res.json(user)` would.
+- **Status transitions are a server-side whitelist
+  (`VENDOR_STATUS_TRANSITIONS`, `constants/roles.js`), not inferred from
+  whatever status string the client sends.** `assertTransitionAllowed`
+  rejects e.g. `pending → suspended` or `approved → rejected` with a
+  `400` even from an authenticated admin — the only legal transitions are
+  the ones spelled out in that table.
+
+## 5. Input validation
 
 - Every request body passes through a Zod schema (`validators/`) before
   reaching a controller. Validation failures return a `400` with
@@ -102,7 +159,7 @@ time:
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 5. Transport & headers
+## 6. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -113,7 +170,7 @@ time:
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 6. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 7. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -125,7 +182,7 @@ time:
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 7. Error handling
+## 8. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -134,14 +191,18 @@ time:
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 8. File uploads (Phase 4+ — not yet implemented)
+## 9. File uploads (not yet implemented)
 
-- Uploads (product images, vendor KYC documents) are validated by
-  MIME-type allowlist and size limit before being forwarded to object
-  storage — never trusted based on file extension alone, and never written
-  to the API server's own disk.
+- Uploads (product images, vendor logo/banner, KYC documents) are
+  validated by MIME-type allowlist and size limit before being forwarded
+  to object storage — never trusted based on file extension alone, and
+  never written to the API server's own disk. Still true as written, not
+  yet built: Phase 4 shipped vendor logo/banner as URL references
+  (`{url, alt}`, the same shape product images already use) rather than
+  handling uploads directly — no domain in the app owns file-upload
+  infrastructure yet.
 
-## 9. Secrets
+## 10. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -149,7 +210,7 @@ time:
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 10. Audit logging (Phase 10 — not yet implemented)
+## 11. Audit logging (Phase 10 — not yet implemented)
 
 A dedicated, queryable `AuditLog` collection (actor, action, target,
 timestamp) is planned for Phase 10, alongside the admin tooling that would
@@ -162,7 +223,7 @@ tracking, but it is **not** a substitute for the real audit trail: it's
 unstructured relative to a query-able collection and isn't retained
 independently of normal log rotation.
 
-## 11. What's intentionally deferred
+## 12. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and

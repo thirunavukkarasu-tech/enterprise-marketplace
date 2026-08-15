@@ -37,3 +37,20 @@ export const VENDOR_STATUS = Object.freeze({
   REJECTED: 'rejected',
   SUSPENDED: 'suspended',
 });
+
+export const ALL_VENDOR_STATUSES = Object.values(VENDOR_STATUS);
+
+/**
+ * Which admin-driven transitions are legal from a given status. Enforced
+ * server-side in vendorService — never inferred from whatever the client
+ * happens to send. REJECTED is terminal for this phase: there's no
+ * resubmission flow yet, so an admin cannot move a rejected vendor
+ * anywhere from here without a product decision on what resubmission
+ * should look like.
+ */
+export const VENDOR_STATUS_TRANSITIONS = Object.freeze({
+  [VENDOR_STATUS.PENDING]: [VENDOR_STATUS.APPROVED, VENDOR_STATUS.REJECTED],
+  [VENDOR_STATUS.APPROVED]: [VENDOR_STATUS.SUSPENDED],
+  [VENDOR_STATUS.SUSPENDED]: [VENDOR_STATUS.APPROVED],
+  [VENDOR_STATUS.REJECTED]: [],
+});

@@ -19,7 +19,7 @@ migrations of data that doesn't exist yet.
 | Product → Variants (size/color/SKU) | **Embedded** | Variants are meaningless outside their parent product and are always fetched together with it. |
 | Product → Category | **Referenced** | Categories are shared across thousands of products and are managed/queried independently (admin CRUD, category-page listing). |
 | Product → Vendor | **Referenced** | A vendor owns many products; products must be queryable per-vendor and vendor data (name, rating) is reused across many products — embedding would duplicate and go stale. |
-| Vendor → Documents (KYC uploads) | **Embedded** | Small, bounded array, only relevant in the context of that vendor's approval record. |
+| Vendor → KYC documents | **Deferred** | Planned as an embedded, bounded array when built — but Phase 4 shipped without it; there's no file-upload infrastructure yet for any domain to attach to. See the Vendor section below. |
 | Cart → Cart Items | **Embedded** | Same reasoning as order items, but mutable — read/written as a unit on every cart change. |
 | Review → Product, Customer | **Referenced** | Reviews are queried both "by product" and "by customer," and must not duplicate product/customer data that changes independently. |
 | Inventory history | **Referenced, separate collection** | Append-only, grows unboundedly, and is queried by date range/product independently of the product document itself — embedding would blow past MongoDB's 16MB document limit over time. |
@@ -46,30 +46,87 @@ exactly one role in this domain (a vendor's staff accounts are a Phase 4+
 concern, out of scope for the core model). Indexed on `email` (unique) and
 `role` (compound with `isActive` for admin user-management queries).
 
-### Vendor
+### Vendor — **implemented in Phase 4**
 ```
 Vendor {
   _id
-  user             ref → User (1:1, indexed, unique)
-  storeName
-  status           enum: pending | approved | rejected | suspended
-  documents        [ { type, url, uploadedAt } ]   // embedded, bounded
-  payoutDetails    { ... }
-  ratingAverage
-  ratingCount
+  user               ref → User (1:1, unique)
+  storeName, legalBusinessName, description
+  businessEmail, businessPhone
+  address            { line1, line2, city, state, country, postalCode }  // embedded sub-schema
+  taxId
+  logo, banner       { url, alt }
+  status             enum: pending | approved | rejected | suspended
+  isVerified, verifiedAt, verifiedBy
+  reviewedBy, reviewedAt, rejectionReason, suspensionReason
   createdAt / updatedAt
 }
 ```
-Separate from `User` (rather than fields on User) because vendor status,
-documents, and payout details are meaningless for the other three roles —
-keeping them apart avoids a User schema full of nullable vendor-only
-fields.
+Indexes: `status`, `isVerified`, `businessEmail`, `createdAt` (descending, for the admin list's default newest-first sort), text index on `{ storeName, legalBusinessName, businessEmail }` (admin search). `user` gets its unique index from the field-level `unique: true` — no separate `schema.index()` call for it (see the Phase 2 postmortem on duplicate-index warnings, which this project keeps re-applying rather than re-learning).
+
+Decisions worth calling out:
+
+- **`address` is a real sub-schema, not a plain object** — self-contained
+  validation (required line1/city/state/country/postalCode) that's
+  reusable if another domain ever needs a postal address shape (e.g. a
+  delivery pickup address in a later phase), rather than duplicating the
+  same five `required` rules inline.
+- **`status` and `isVerified` are two independent fields, not one.**
+  `status` governs whether the vendor may sell at all (the
+  pending/approved/rejected/suspended lifecycle below). `isVerified` is a
+  separate "business documents checked" signal an admin can set
+  regardless of status — verifiable while still pending, and not
+  automatically revoked on suspension, since a suspension doesn't
+  retroactively make previously-checked business information fraudulent.
+  Collapsing these into one field would force a choice between "verified
+  vendors are always approved" (wrong — verification can happen first)
+  or "approval implies verification" (also wrong — an admin might
+  approve based on the application alone and verify documents later).
+- **`documents` (KYC uploads) from the original Phase 1 speculative
+  design is deferred, not built.** Phase 4 has no file-upload
+  infrastructure yet (that's a Phase 3/4-adjacent concern — Cloudinary/S3
+  abstraction — not yet wired to any domain). `logo`/`banner` use the
+  same `{url, alt}` shape a future document-upload feature would reuse.
+- **`payoutDetails` from the original speculative design is deferred.**
+  Nothing pays a vendor out until Phase 7 has real orders and Phase 7's
+  payment abstraction exists — defining a payout schema now would be
+  guessing at a shape with no consumer to validate it against.
+
+### Vendor ↔ Product relationship — **why `Product.vendor` still points at `User`, not `Vendor`**
+
+Phase 3's design note on this page originally floated repointing
+`Product.vendor` to `Vendor._id` once Phase 4 built the Vendor
+collection. Having now built it, the repoint turned out to add no
+guarantee that didn't already exist:
+
+- `Vendor.user` is a unique 1:1 pointer to the same `User` document
+  `Product.vendor` already references — every vendor-owned product is
+  already reliably attributable to exactly one vendor profile via that
+  relationship.
+- Every ownership check (`canManageProduct`) and every scoping query
+  (`productService.listManaged`, the vendor dashboard's product counts)
+  already works correctly comparing against `req.user.id` — a `User` id
+  is just as unique and just as reliable a foreign key as a `Vendor` id
+  would be here.
+- Repointing would touch Product's schema, every product query, and
+  every ownership check across tested, approved Phase 3 code — for zero
+  new capability. That's pure churn, not a fix, and the project's stated
+  rule is not to refactor a completed phase without a genuine dependency
+  issue forcing it.
+
+The vendor dashboard's product counts (`Product.countDocuments({ vendor:
+userId })`) and the admin's `GET /products/manage?vendor=<id>` filter
+both key off this same `User` id — no join between Product and Vendor is
+needed for either. If a future phase ever needs to query "all products
+for vendor profile X" starting from a `Vendor` document rather than a
+`User`, `Vendor.user` → `Product.vendor` is a single equality lookup, not
+a schema change.
 
 ### Product — **implemented in Phase 3**
 ```
 Product {
   _id
-  vendor           ref → User (indexed) — see note below
+  vendor           ref → User (indexed) — see the Vendor section above for why not Vendor._id
   category         ref → Category (indexed)
   title, description, slug (unique, indexed)
   variants         [ { sku (globally unique, indexed), attributes, price, compareAtPrice, stock, reservedStock } ]
@@ -82,17 +139,8 @@ Product {
 ```
 Indexes: `{ vendor: 1, status: 1 }` (vendor's own product list), `{ category: 1, status: 1 }` (category browsing), `{ status: 1, 'priceRange.min': 1 }` (storefront price sort), text index on `{ title, description }` (search), unique index on `variants.sku` (global SKU uniqueness — a unique index on an array field path is multikey in Mongo, so this is enforced across every document, not just within one product).
 
-Two decisions worth calling out from actually building it:
+Two other decisions worth calling out from actually building it:
 
-- **`vendor` references `User`, not `Vendor`.** The dedicated `Vendor`
-  collection (storefront metadata, approval status, payout details) isn't
-  built until Phase 4 — building Product in Phase 3 meant either blocking
-  on Phase 4 or pointing at what exists today (`User`, since every vendor
-  already has one from Phase 2's registration flow). Every vendor-scoping
-  check compares this field against `req.user.id`, so repointing it at
-  `Vendor._id` in Phase 4 is planned to be a one-line service change, not
-  a data migration — `Vendor.user` will stay a 1:1 pointer back to the
-  same `User`.
 - **`priceRange.{min,max}` is denormalized**, recomputed by
   `productService.recomputePriceRange` on every create/update/variant
   mutation. Sorting or filtering a storefront listing by price without

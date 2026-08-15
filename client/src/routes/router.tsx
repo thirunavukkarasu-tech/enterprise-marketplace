@@ -12,9 +12,11 @@ import { ProductDetail } from '../pages/storefront/ProductDetail';
 import { AdminOverview } from '../pages/admin/AdminOverview';
 import { AdminProducts } from '../pages/admin/AdminProducts';
 import { AdminCategories } from '../pages/admin/AdminCategories';
+import { AdminVendors } from '../pages/admin/AdminVendors';
 import { VendorOverview } from '../pages/vendor/VendorOverview';
 import { VendorProducts } from '../pages/vendor/VendorProducts';
 import { VendorProductForm } from '../pages/vendor/VendorProductForm';
+import { VendorProfile } from '../pages/vendor/VendorProfile';
 import { DeliveryActive } from '../pages/delivery/DeliveryActive';
 import { PlaceholderPage } from '../components/common/PlaceholderPage';
 import { Unauthorized } from '../pages/Unauthorized';
@@ -41,7 +43,7 @@ const vendorNav = [
   { to: '/vendor', label: 'Overview', icon: LayoutDashboard },
   { to: '/vendor/products', label: 'Products', icon: Boxes },
   { to: '/vendor/orders', label: 'Orders', icon: ShoppingCart },
-  { to: '/vendor/settings', label: 'Settings', icon: Settings },
+  { to: '/vendor/settings', label: 'Store Profile', icon: Settings },
 ];
 
 export const router = createBrowserRouter([
@@ -78,7 +80,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <AdminOverview /> },
-      { path: 'vendors', element: <PlaceholderPage title="Vendor approvals" phase="Phase 4" /> },
+      { path: 'vendors', element: <AdminVendors /> },
       { path: 'products', element: <AdminProducts /> },
       { path: 'categories', element: <AdminCategories /> },
       { path: 'orders', element: <PlaceholderPage title="Order monitoring" phase="Phase 7" /> },
@@ -99,7 +101,7 @@ export const router = createBrowserRouter([
       { path: 'products/new', element: <VendorProductForm /> },
       { path: 'products/:id/edit', element: <VendorProductForm /> },
       { path: 'orders', element: <PlaceholderPage title="Vendor orders" phase="Phase 7" /> },
-      { path: 'settings', element: <PlaceholderPage title="Vendor profile" phase="Phase 4" /> },
+      { path: 'settings', element: <VendorProfile /> },
     ],
   },
   {

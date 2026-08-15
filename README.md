@@ -5,9 +5,9 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 3 of 11 complete — foundation, authentication & RBAC,
-> plus product & category management. See [`docs/ROADMAP.md`](docs/ROADMAP.md)
-> for what's next.
+> **Status**: Phase 4 of 11 complete — foundation, authentication & RBAC,
+> product & category management, plus vendor management. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
 
 ## Overview
 
@@ -69,7 +69,7 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 |---|---|
 | Auth, sessions, RBAC | 2 ✅ |
 | Product & category catalog | 3 ✅ |
-| Vendor onboarding & approval | 4 |
+| Vendor onboarding & approval | 4 ✅ |
 | Customer browsing, search, wishlist | 5 |
 | Cart & checkout | 6 |
 | Multi-vendor order splitting, inventory, payment abstraction | 7 |
@@ -127,7 +127,11 @@ local/demo use only, never for a real deployment:
 | Delivery Partner | `delivery@marketsphere.dev` | `Delivery@12345` |
 
 All four are created with `isEmailVerified: true` so they can log in
-immediately without walking through the verification email step.
+immediately without walking through the verification email step. The
+seeded vendor account has no store profile yet — logging in as
+`vendor@marketsphere.dev` lands on the "set up your store" empty state,
+since onboarding (`POST /vendors/me`) is a real business-info submission
+flow, not something a generic seed script should fabricate.
 
 ### Frontend
 
@@ -147,21 +151,27 @@ npm test
 
 This runs the full unit test suite (JWT signing/verification, token
 hashing, duration parsing, Zod validators, RBAC middleware, slugify/
-unique-slug generation, product ownership rules, product/category
-validators — 50 tests, no database required) plus the health-check
-integration tests (2 tests). Three further integration suites need a real
-MongoDB connection and are skipped by default in environments without one
-(shown as 3 skip-notice tests in the count, 55 total): the full auth flow
-(register → login → refresh-rotation → logout, reuse detection, generic
-error messages, deactivated-user rejection), category management (cycle
-prevention, deletion guards, active-only public listing), and product
-management (cross-vendor ownership enforcement, SKU uniqueness, status
-transitions, public visibility rules):
+unique-slug generation, product ownership rules, product/category/vendor
+validators, vendor status transitions — 70 tests, no database required)
+plus the health-check integration tests (2 tests). Four further
+integration suites need a real MongoDB connection and are skipped by
+default in environments without one (shown as 4 skip-notice tests in the
+count, 76 total): the full auth flow (register → login →
+refresh-rotation → logout, reuse detection, generic error messages,
+deactivated-user rejection), category management (cycle prevention,
+deletion guards, active-only public listing), product management
+(cross-vendor ownership enforcement, SKU uniqueness, status transitions,
+public visibility rules), and vendor management (onboarding, cross-vendor
+IDOR checks, self-approval/self-verification prevention, mass-assignment
+rejection, the full approve/reject/suspend/reactivate lifecycle, and a
+regression check that product ownership still works with vendor
+management layered on top):
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/categories.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/products.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/vendors.test.js
 ```
 
 Each suite creates its own isolated database and drops it when finished.
@@ -183,11 +193,13 @@ Versioned under `/api/v1`. Every response follows:
 ```
 
 Full reference for authentication (register, login, logout, refresh,
-forgot/reset password, email verification, `/me`) and for category/
-product management (public storefront listing/search/filtering, and the
-vendor/admin managed endpoints with ownership enforcement) is in
-[`docs/API.md`](docs/API.md). Vendor, order, and other domain endpoints
-are added there as their phases ship.
+forgot/reset password, email verification, `/me`), category/product
+management (public storefront listing/search/filtering, and the
+vendor/admin managed endpoints with ownership enforcement), and vendor
+management (self-service onboarding/profile/dashboard, and admin
+approve/reject/suspend/reactivate/verify) is in
+[`docs/API.md`](docs/API.md). Order and other domain endpoints are added
+there as their phases ship.
 
 ## Health check
 

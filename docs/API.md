@@ -299,9 +299,115 @@ Requires ownership (or admin). Rejected with `400` if it's the product's only re
 
 ---
 
+## Vendors
+
+Two surfaces: **self-service** (`vendor` role, scoped to the caller's own
+profile — no vendor endpoint here ever takes an id from the client) and
+**admin management** (`super_admin`, operates on any vendor by id). See
+`docs/SECURITY.md` §4 for why this route separation, not just an
+ownership check, is the IDOR defense here.
+
+### `POST /vendors/me`
+
+Requires `vendor` role. Onboards the caller's business profile — one per
+account (`409` if one already exists).
+
+**Body**
+```json
+{
+  "storeName": "Acme Supplies",
+  "legalBusinessName": "Acme Supplies LLC",
+  "description": "optional",
+  "businessEmail": "contact@acme.test",
+  "businessPhone": "+1 555-123-4567",
+  "address": { "line1": "123 Market St", "line2": "optional", "city": "Springfield", "state": "IL", "country": "USA", "postalCode": "62704" },
+  "taxId": "optional",
+  "logo": { "url": "https://...", "alt": "optional" },
+  "banner": { "url": "https://...", "alt": "optional" }
+}
+```
+
+**201 Created** — `data.vendor`, always `status: "pending"`, `isVerified: false` — never trusted from the request body even if sent.
+
+**Errors**: `400` validation failure · `403` non-vendor role · `409` profile already exists
+
+### `GET /vendors/me`
+
+Requires `vendor` role. `404` if the caller hasn't onboarded yet — the
+frontend uses this to decide whether to show the onboarding form or the
+edit form.
+
+### `PATCH /vendors/me`
+
+Requires `vendor` role. Partial body — any subset of the onboarding
+fields. `status`, `isVerified`, and all admin/review fields are absent
+from the schema, not merely rejected — there's no code path that could
+let one through.
+
+### `GET /vendors/me/dashboard`
+
+Requires `vendor` role.
+
+**200 OK**
+```json
+{ "success": true, "data": {
+  "vendor": { "...": "..." },
+  "productCounts": { "total": 12, "active": 8, "draft": 3, "archived": 1 },
+  "profileCompletion": 80,
+  "recentProducts": [ { "_id": "...", "title": "...", "slug": "...", "status": "active", "priceRange": {...}, "createdAt": "..." } ],
+  "notices": [ { "tone": "info", "message": "Add your first product to start selling." } ]
+} }
+```
+`productCounts` and `recentProducts` are real `Product.countDocuments`/`find` queries scoped to the caller — never fabricated. `notices` surface status-relevant messages (pending review, rejection/suspension reason, "add your first product").
+
+A vendor's own products are listed via the existing Phase 3 endpoint,
+`GET /products/manage` (already vendor-scoped) — there's no second,
+duplicate "my products" endpoint under `/vendors`.
+
+### `GET /vendors`
+
+Requires `super_admin`.
+
+**Query params**: `q` (search store/legal name/business email), `status` (`pending`|`approved`|`rejected`|`suspended`), `isVerified` (`true`|`false`), `sort` (`newest`|`oldest`|`name_asc`|`name_desc`, default `newest`), `page`, `limit` (default 20, max 100).
+
+**200 OK** — same `{ data: { vendors: [...] }, meta: {...} }` shape as the Phase 3 product listing.
+
+### `GET /vendors/:id`
+
+Requires `super_admin`. `400` on a malformed id, `404` if not found.
+
+### `PATCH /vendors/:id/approve`
+
+Requires `super_admin`. Legal only from `pending` or `rejected`. `400` on any other current status (e.g. already `approved`).
+
+### `PATCH /vendors/:id/reject`
+
+Requires `super_admin`. Legal only from `pending`.
+
+**Body**: `{ "reason": "..." }` — 10–500 characters, required.
+
+### `PATCH /vendors/:id/suspend`
+
+Requires `super_admin`. Legal only from `approved`.
+
+**Body**: `{ "reason": "..." }` — optional, but 10–500 characters if provided.
+
+### `PATCH /vendors/:id/reactivate`
+
+Requires `super_admin`. Legal only from `suspended` — moves back to `approved`.
+
+### `PATCH /vendors/:id/verify`
+
+Requires `super_admin`. Independent of the status transitions above —
+callable regardless of current status.
+
+**Body**: `{ "isVerified": true }` (or `false` to revoke).
+
+---
+
 ## Coming in later phases
 
-Vendor, order, cart, coupon, review, delivery, and analytics endpoints are
+Order, cart, coupon, review, delivery, and analytics endpoints are
 added as their respective phases ship (see `docs/ROADMAP.md`). This
 document grows alongside the code that actually implements each route —
 it does not describe endpoints ahead of their implementation.

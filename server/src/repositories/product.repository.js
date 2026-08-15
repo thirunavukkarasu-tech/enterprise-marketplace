@@ -16,10 +16,10 @@ const SORT_MAP = {
  * once. A simple `findById` elsewhere in the app is not given this
  * treatment; see docs/ARCHITECTURE.md §2 for the rule being applied.
  */
-function buildFilter({ search, category, minPrice, maxPrice, status, vendor }) {
+function buildFilter({ q, category, minPrice, maxPrice, status, vendor }) {
   const filter = {};
 
-  if (search) filter.$text = { $search: search };
+  if (q) filter.$text = { $search: q };
   if (category) filter.category = category;
   if (vendor) filter.vendor = vendor;
 
@@ -38,7 +38,7 @@ function buildFilter({ search, category, minPrice, maxPrice, status, vendor }) {
 
 export const productRepository = {
   async list({
-    search,
+    q,
     category,
     minPrice,
     maxPrice,
@@ -48,7 +48,7 @@ export const productRepository = {
     page = PAGINATION_DEFAULTS.PAGE,
     limit = PAGINATION_DEFAULTS.LIMIT,
   }) {
-    const filter = buildFilter({ search, category, minPrice, maxPrice, status, vendor });
+    const filter = buildFilter({ q, category, minPrice, maxPrice, status, vendor });
     const sortSpec = SORT_MAP[sort] ?? SORT_MAP[PRODUCT_SORT.NEWEST];
     const skip = (page - 1) * limit;
 
