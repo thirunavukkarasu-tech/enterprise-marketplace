@@ -4,7 +4,10 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 export const categoryController = {
   async list(req, res) {
     // Public: always active-only, regardless of any query the caller sends.
-    const categories = await categoryService.list({ includeInactive: false });
+    // `withCounts` is the one opt-in exception — it only adds a
+    // `productCount` field per category, it never changes which
+    // categories are returned.
+    const categories = await categoryService.list({ includeInactive: false, withCounts: req.query.withCounts });
     new ApiResponse(200, { categories }).send(res);
   },
 

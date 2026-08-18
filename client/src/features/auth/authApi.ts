@@ -5,6 +5,9 @@ export interface AuthUser {
   _id: string;
   name: string;
   email: string;
+  /** Optional — added to the User model in Phase 5 for the account
+   * profile page; absent on accounts created before that. */
+  phone?: string;
   role: Role;
   isEmailVerified: boolean;
   isActive: boolean;

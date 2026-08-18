@@ -9,6 +9,10 @@ import { AuthLayout } from '../layouts/AuthLayout';
 import { StorefrontHome } from '../pages/storefront/StorefrontHome';
 import { ProductListing } from '../pages/storefront/ProductListing';
 import { ProductDetail } from '../pages/storefront/ProductDetail';
+import { CategoriesIndex } from '../pages/storefront/CategoriesIndex';
+import { CategoryBrowse } from '../pages/storefront/CategoryBrowse';
+import { Wishlist } from '../pages/customer/Wishlist';
+import { CustomerProfile } from '../pages/customer/CustomerProfile';
 import { AdminOverview } from '../pages/admin/AdminOverview';
 import { AdminProducts } from '../pages/admin/AdminProducts';
 import { AdminCategories } from '../pages/admin/AdminCategories';
@@ -54,9 +58,26 @@ export const router = createBrowserRouter([
       { index: true, element: <StorefrontHome /> },
       { path: 'products', element: <ProductListing /> },
       { path: 'products/:slug', element: <ProductDetail /> },
-      { path: 'categories', element: <PlaceholderPage title="Categories" phase="Phase 3" /> },
-      { path: 'vendors', element: <PlaceholderPage title="Vendor directory" phase="Phase 4" /> },
+      { path: 'categories', element: <CategoriesIndex /> },
+      { path: 'categories/:id', element: <CategoryBrowse /> },
+      { path: 'vendors', element: <PlaceholderPage title="Vendor directory" phase="Coming soon" /> },
       { path: 'cart', element: <PlaceholderPage title="Cart" phase="Phase 6" /> },
+      {
+        path: 'wishlist',
+        element: (
+          <ProtectedRoute allowedRoles={['customer']}>
+            <Wishlist />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'account',
+        element: (
+          <ProtectedRoute>
+            <CustomerProfile />
+          </ProtectedRoute>
+        ),
+      },
     ],
   },
   {
@@ -84,7 +105,7 @@ export const router = createBrowserRouter([
       { path: 'products', element: <AdminProducts /> },
       { path: 'categories', element: <AdminCategories /> },
       { path: 'orders', element: <PlaceholderPage title="Order monitoring" phase="Phase 7" /> },
-      { path: 'customers', element: <PlaceholderPage title="Customer management" phase="Phase 4" /> },
+      { path: 'customers', element: <PlaceholderPage title="Customer management" phase="Coming soon" /> },
       { path: 'settings', element: <PlaceholderPage title="System settings" phase="Phase 10" /> },
     ],
   },

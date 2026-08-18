@@ -11,7 +11,7 @@ type Status = 'idle' | 'loading' | 'success' | 'error';
  * used by every catalog screen instead of duplicating loading/error
  * handling in each component.
  */
-export function useCategories({ managed = false }: { managed?: boolean } = {}) {
+export function useCategories({ managed = false, withCounts = false }: { managed?: boolean; withCounts?: boolean } = {}) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export function useCategories({ managed = false }: { managed?: boolean } = {}) {
     setStatus('loading');
     setError(null);
     try {
-      const result = managed ? await categoryApi.listManaged() : await categoryApi.list();
+      const result = managed ? await categoryApi.listManaged() : await categoryApi.list({ withCounts });
       setCategories(result);
       setStatus('success');
     } catch (err) {
@@ -28,7 +28,7 @@ export function useCategories({ managed = false }: { managed?: boolean } = {}) {
       setError(anyErr.response?.data?.message ?? 'Failed to load categories.');
       setStatus('error');
     }
-  }, [managed]);
+  }, [managed, withCounts]);
 
   useEffect(() => {
     refetch();

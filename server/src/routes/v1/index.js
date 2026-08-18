@@ -4,6 +4,8 @@ import authRoute from './auth.route.js';
 import categoryRoute from './category.route.js';
 import productRoute from './product.route.js';
 import vendorRoute from './vendor.route.js';
+import userRoute from './user.route.js';
+import wishlistRoute from './wishlist.route.js';
 
 const router = Router();
 
@@ -12,6 +14,8 @@ router.use('/auth', authRoute);
 router.use('/categories', categoryRoute);
 router.use('/products', productRoute);
 router.use('/vendors', vendorRoute);
+router.use('/users', userRoute);
+router.use('/wishlist', wishlistRoute);
 
 /**
  * Phase-by-phase route registration happens here, e.g.:

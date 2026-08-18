@@ -39,6 +39,16 @@ const userSchema = new mongoose.Schema(
       default: true,
     },
 
+    // Optional — added in Phase 5 for the customer (and general account)
+    // profile page. Deliberately not required: it didn't exist through
+    // registration in Phase 2, so every existing account would otherwise
+    // start in a permanently-invalid state.
+    phone: {
+      type: String,
+      trim: true,
+      match: [/^[+]?[0-9\s\-()]{7,20}$/, 'Invalid phone number'],
+    },
+
     // Email verification (hashed token; raw token only ever exists in the
     // outgoing email/link, never persisted).
     emailVerificationTokenHash: { type: String, select: false },

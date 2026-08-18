@@ -1,5 +1,5 @@
 import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
-import { LogOut, LayoutDashboard } from 'lucide-react';
+import { LogOut, LayoutDashboard, Heart, UserCircle } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
 import { Button } from '../components/ui/Button';
 import { useAppDispatch, useAppSelector } from '../hooks/useAppStore';
@@ -15,6 +15,7 @@ const navLinks = [
 
 export function StorefrontLayout() {
   const { user, status } = useAppSelector((state) => state.auth);
+  const wishlistCount = useAppSelector((state) => state.wishlist.productIds.length);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
 
@@ -54,6 +55,16 @@ export function StorefrontLayout() {
           <div className="flex items-center gap-3">
             {status === 'authenticated' && user ? (
               <>
+                {user.role === 'customer' && (
+                  <Link to="/wishlist" className="relative flex h-9 w-9 items-center justify-center rounded-md text-ink-soft hover:bg-slate-100" aria-label="Wishlist">
+                    <Heart size={18} />
+                    {wishlistCount > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 font-mono text-[10px] text-white">
+                        {wishlistCount}
+                      </span>
+                    )}
+                  </Link>
+                )}
                 {dashboardPath && dashboardPath !== '/' && (
                   <Link to={dashboardPath}>
                     <Button variant="ghost" size="sm">
@@ -61,7 +72,10 @@ export function StorefrontLayout() {
                     </Button>
                   </Link>
                 )}
-                <span className="hidden text-sm font-medium text-ink-soft sm:inline">Hi, {user.name.split(' ')[0]}</span>
+                <Link to="/account" className="hidden items-center gap-1.5 text-sm font-medium text-ink-soft hover:text-ink sm:flex">
+                  <UserCircle size={16} />
+                  {user.name.split(' ')[0]}
+                </Link>
                 <Button variant="secondary" size="sm" onClick={handleLogout}>
                   <LogOut size={15} /> Sign out
                 </Button>

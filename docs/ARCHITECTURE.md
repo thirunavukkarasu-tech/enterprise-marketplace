@@ -82,9 +82,21 @@ of sync. `DeliveryLayout` is a separate, mobile-first shell (top bar +
 bottom tabs) because delivery partners work from a phone in the field, not
 a desktop — that's a real UX difference, not an arbitrary one.
 
-**State**: Redux Toolkit holds cross-cutting, multi-screen state (session,
-cart, notifications). Screen-local state (form inputs, toggles) stays in
-component state — not every piece of state needs to be global.
+**State**: Redux Toolkit holds cross-cutting, multi-screen state — session
+(Phase 2), wishlist (Phase 5). The test applied consistently since Phase 1
+isn't "is this server data" but "does the same fact need to render
+consistently in more than one place at once." Wishlist membership is the
+clearest example: the same "is this product saved" fact has to show up on
+a product card in a grid *and* the detail page *and* a header badge count,
+all simultaneously — that's what makes it a Redux slice
+(`features/wishlist/wishlistSlice.ts`) rather than a fetch hook. Product/
+category browsing, by contrast, stays screen-local (`useProducts`,
+`useCategories` — plain hooks over `useState`/`useEffect`, not slices):
+a product listing's filters and results are read once per page visit and
+don't need to be visible from anywhere else in the app at the same time.
+Form inputs and toggles stay in component state either way — not every
+piece of state needs to be global, and not every piece of server data
+needs to be in Redux either.
 
 ## 5. Real-time layer
 

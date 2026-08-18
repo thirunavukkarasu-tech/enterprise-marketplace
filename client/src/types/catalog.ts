@@ -14,6 +14,8 @@ export interface Category {
   parent: string | null;
   image?: CategoryImage;
   isActive: boolean;
+  /** Only present when the list was requested with ?withCounts=true. */
+  productCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,9 +41,18 @@ export interface CategoryRef {
   slug: string;
 }
 
+export interface VendorStoreSummary {
+  storeName: string;
+  logo: { url: string; alt?: string } | null;
+  isVerified: boolean;
+}
+
 export interface Product {
   _id: string;
   vendor: string;
+  /** Present only on public storefront responses — the vendor/admin
+   * managed endpoints don't need a storefront-branded summary. */
+  vendorStore?: VendorStoreSummary | null;
   category: CategoryRef | string;
   title: string;
   description: string;
@@ -68,6 +79,7 @@ export interface ProductListQuery {
   category?: string;
   minPrice?: number;
   maxPrice?: number;
+  inStock?: boolean;
   status?: ProductStatus;
   vendor?: string;
   sort?: ProductSort;

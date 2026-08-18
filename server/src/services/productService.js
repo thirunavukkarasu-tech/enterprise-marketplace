@@ -1,5 +1,6 @@
 import { Product } from '../models/Product.model.js';
 import { Category } from '../models/Category.model.js';
+import { Vendor } from '../models/Vendor.model.js';
 import { productRepository } from '../repositories/product.repository.js';
 import { ApiError } from '../utils/ApiError.js';
 import { generateUniqueSlug } from '../utils/uniqueSlug.js';
@@ -13,6 +14,48 @@ function recomputePriceRange(product) {
     min: prices.length ? Math.min(...prices) : 0,
     max: prices.length ? Math.max(...prices) : 0,
   };
+}
+
+/**
+ * Attaches a customer-safe `vendorStore` summary to public product
+ * responses — the storefront should say "Sold by Acme Supplies," not
+ * show a raw vendor ObjectId. `Product.vendor` references `User` (see
+ * docs/DATABASE.md for why), and the storefront-facing store name lives
+ * on `Vendor`, so this is a lookup by `Vendor.user`, not a `.populate()`
+ * on the `vendor` field itself — populating `vendor` would pull the
+ * User document (name/email), not the store profile.
+ *
+ * Deliberately tolerant of a missing Vendor profile (`vendorStore: null`)
+ * rather than filtering those products out: Phase 3 established that any
+ * `vendor`-role account can list products once their account exists, and
+ * changing that to require an *approved* Vendor profile is a write-path
+ * policy decision for product creation/activation — out of scope for a
+ * customer-facing read enrichment in Phase 5, and would invalidate
+ * Phase 3's own approved test suite (which activates vendor products
+ * without ever onboarding a Vendor profile for the owning account). See
+ * docs/ARCHITECTURE.md for the fuller reasoning.
+ */
+async function attachVendorStores(products) {
+  const list = Array.isArray(products) ? products : [products];
+  const vendorUserIds = [...new Set(list.map((p) => p.vendor.toString()))];
+
+  const vendors = await Vendor.find({ user: { $in: vendorUserIds } })
+    .select('storeName logo isVerified user')
+    .lean();
+  const storeByUserId = new Map(vendors.map((v) => [v.user.toString(), v]));
+
+  const enrich = (product) => {
+    const store = storeByUserId.get(product.vendor.toString());
+    return {
+      ...product.toObject({ virtuals: true }),
+      vendorStore: store
+        ? { storeName: store.storeName, logo: store.logo ?? null, isVerified: store.isVerified }
+        : null,
+    };
+  };
+
+  const result = list.map(enrich);
+  return Array.isArray(products) ? result : result[0];
 }
 
 async function assertCategoryExists(categoryId) {
@@ -42,7 +85,8 @@ async function loadManagedOrThrow(user, id) {
 export const productService = {
   // ── public storefront ────────────────────────────────────────────────
   async listPublic(query) {
-    return productRepository.list({ ...query, status: PRODUCT_STATUS.ACTIVE });
+    const result = await productRepository.list({ ...query, status: PRODUCT_STATUS.ACTIVE });
+    return { ...result, items: await attachVendorStores(result.items) };
   },
 
   async getPublicBySlug(slug) {
@@ -50,7 +94,7 @@ export const productService = {
     if (!product || product.status !== PRODUCT_STATUS.ACTIVE) {
       throw ApiError.notFound('Product not found');
     }
-    return product;
+    return attachVendorStores(product);
   },
 
   // ── vendor / admin management ───────────────────────────────────────

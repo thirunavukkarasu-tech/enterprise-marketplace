@@ -8,9 +8,13 @@ interface Envelope<T> {
 }
 
 export const categoryApi = {
-  /** Public: active categories only. */
-  async list() {
-    const res = await apiClient.get<Envelope<{ categories: Category[] }>>('/categories');
+  /** Public: active categories only. `withCounts` adds a `productCount`
+   * per category (one aggregation server-side, not N+1 queries) — opt-in
+   * since most callers (e.g. a form's category <select>) don't need it. */
+  async list({ withCounts = false }: { withCounts?: boolean } = {}) {
+    const res = await apiClient.get<Envelope<{ categories: Category[] }>>(
+      `/categories${withCounts ? '?withCounts=true' : ''}`
+    );
     return res.data.data.categories;
   },
 

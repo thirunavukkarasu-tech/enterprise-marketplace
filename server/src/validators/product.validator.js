@@ -100,6 +100,13 @@ export const listPublicProductsQuerySchema = z.object({
     category: mongoId.optional(),
     minPrice: coerceNumber('minPrice must be a number'),
     maxPrice: coerceNumber('maxPrice must be a number'),
+    // true = at least one variant currently has stock; false = every
+    // variant is out of stock. Absent means "don't filter by stock."
+    inStock: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === 'true')),
+    vendor: mongoId.optional(),
     sort: z.enum(ALL_PRODUCT_SORTS).optional(),
     page: z.coerce.number().int().min(1).optional().default(PAGINATION_DEFAULTS.PAGE),
     limit: z.coerce.number().int().min(1).max(PAGINATION_DEFAULTS.MAX_LIMIT).optional().default(PAGINATION_DEFAULTS.LIMIT),

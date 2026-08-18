@@ -35,6 +35,7 @@ User {
   email            (unique, indexed)
   passwordHash
   role             enum: super_admin | vendor | customer | delivery_partner
+  phone            optional — added in Phase 5 for the account profile page
   isEmailVerified  boolean
   isActive         boolean
   refreshTokenVersion  number   // incremented on logout/reuse-detection
@@ -45,6 +46,9 @@ User {
 exactly one role in this domain (a vendor's staff accounts are a Phase 4+
 concern, out of scope for the core model). Indexed on `email` (unique) and
 `role` (compound with `isActive` for admin user-management queries).
+`phone` is optional and unindexed — it didn't exist through registration
+in Phase 2, so every pre-Phase-5 account would otherwise start in a
+permanently-invalid state if it were required.
 
 ### Vendor — **implemented in Phase 4**
 ```
@@ -217,6 +221,40 @@ Cart {
   updatedAt
 }
 ```
+Still Phase 6's to build — see the note in the Roadmap. Phase 5's
+storefront has a confirmation-only "Add to cart" interaction (a client-side
+"Added ✓" state, nothing persisted) precisely so this schema isn't built
+twice against two different sets of requirements.
+
+### Wishlist — **implemented in Phase 5**
+```
+Wishlist {
+  _id
+  user       ref → User (unique, indexed)
+  products   [ ref → Product ]     // embedded array of references
+  createdAt / updatedAt
+}
+```
+One document per user with an embedded array of `Product` references —
+not a separate `WishlistItem`-per-row collection. This follows the same
+rule as everywhere else on this page (§1): a wishlist is always read and
+written as one unit ("my wishlist"), is reasonably bounded (dozens of
+items, not thousands), and nothing in the app needs to query "who
+wishlisted product X" independently of a specific user's list. Contrast
+with `RefreshToken`, which deliberately *is* a separate per-record
+collection — there, each token genuinely needs independent expiry and
+revocation, which a wishlist entry does not.
+
+A wishlisted product can be hard-deleted independently of the wishlist
+that references it — Phase 3's product delete has no awareness that
+wishlists exist, and deliberately isn't changed to gain that awareness
+(see `docs/ARCHITECTURE.md` on not refactoring a completed phase without
+a genuine dependency forcing it). `populate()` silently returns `null`
+for that now-dangling reference rather than throwing;
+`wishlistService.getOwn` filters those out of the response and quietly
+repairs the stored array to match, so a deleted product doesn't
+permanently linger as an invisible entry that still counts toward the
+list.
 
 ### Inventory
 Stock lives on `Product.variants[].stock` for simple reads, with a
@@ -279,3 +317,18 @@ Every index above exists because a specific screen or query needs it —
 log by actor." No index is added speculatively; unused indexes cost write
 performance for no read benefit, which matters more once the product
 catalog and order volume grow past demo-data size.
+
+**Phase 5 review**: the new customer-facing query capabilities (`inStock`
+filtering, category `productCount` aggregation, vendor-store lookup by
+`Vendor.user`) were checked against the existing index set rather than
+assumed to need new ones. None do, at this scale: `inStock` filters on
+`variants.stock`, an unindexed dotted-path match — adding an index purely
+for this would be premature without evidence it's actually a bottleneck,
+and it would always be combined with `status` (already indexed) in
+practice, which already narrows the scan substantially. The category
+count aggregation groups by `Product.category`, which is already indexed
+(`{ category: 1, status: 1 }`, from Phase 3). The vendor-store lookup
+queries `Vendor` by `user`, which already has a unique index (Phase 4).
+Nothing here needed a new index; this section is updated to say so
+explicitly, rather than the absence of a change being ambiguous between
+"reviewed, not needed" and "not reviewed."

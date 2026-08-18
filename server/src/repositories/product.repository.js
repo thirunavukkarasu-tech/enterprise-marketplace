@@ -16,7 +16,7 @@ const SORT_MAP = {
  * once. A simple `findById` elsewhere in the app is not given this
  * treatment; see docs/ARCHITECTURE.md §2 for the rule being applied.
  */
-function buildFilter({ q, category, minPrice, maxPrice, status, vendor }) {
+function buildFilter({ q, category, minPrice, maxPrice, status, vendor, inStock }) {
   const filter = {};
 
   if (q) filter.$text = { $search: q };
@@ -33,6 +33,16 @@ function buildFilter({ q, category, minPrice, maxPrice, status, vendor }) {
     if (maxPrice !== undefined) filter['priceRange.min'].$lte = maxPrice;
   }
 
+  // "In stock" means at least one variant currently has stock; "out of
+  // stock" means every variant is at zero. A dotted path match on an
+  // array field (`variants.stock`) is Mongo's shorthand for "any element
+  // matches" — equivalent to $elemMatch for a single-condition check.
+  if (inStock === true) {
+    filter['variants.stock'] = { $gt: 0 };
+  } else if (inStock === false) {
+    filter.variants = { $not: { $elemMatch: { stock: { $gt: 0 } } } };
+  }
+
   return filter;
 }
 
@@ -44,11 +54,12 @@ export const productRepository = {
     maxPrice,
     status,
     vendor,
+    inStock,
     sort = PRODUCT_SORT.NEWEST,
     page = PAGINATION_DEFAULTS.PAGE,
     limit = PAGINATION_DEFAULTS.LIMIT,
   }) {
-    const filter = buildFilter({ q, category, minPrice, maxPrice, status, vendor });
+    const filter = buildFilter({ q, category, minPrice, maxPrice, status, vendor, inStock });
     const sortSpec = SORT_MAP[sort] ?? SORT_MAP[PRODUCT_SORT.NEWEST];
     const skip = (page - 1) * limit;
 

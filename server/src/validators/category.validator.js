@@ -43,6 +43,13 @@ export const listCategoriesQuerySchema = z.object({
       .enum(['true', 'false'])
       .optional()
       .transform((v) => v === 'true'),
+    // Phase 5: opt-in product counts for the storefront category nav.
+    // Absent/false preserves the exact original response shape for every
+    // existing caller — this is additive, not a behavior change.
+    withCounts: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => v === 'true'),
   }),
   params: z.object({}).optional(),
 });

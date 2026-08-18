@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ImageOff, ChevronLeft } from 'lucide-react';
+import { ImageOff, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { productApi } from '../../features/catalog/productApi';
 import type { Product, ProductVariant } from '../../types/catalog';
 import { Spinner } from '../../components/common/Spinner';
 import { ErrorState } from '../../components/common/ErrorState';
+import { Breadcrumbs } from '../../components/common/Breadcrumbs';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { WishlistButton } from '../../components/product/WishlistButton';
 import { cn } from '../../utils/cn';
 
 function formatPrice(amount: number) {
@@ -21,6 +23,8 @@ export function ProductDetail() {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [selectedSku, setSelectedSku] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState(false);
+  const [addedToCart, setAddedToCart] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
@@ -29,7 +33,10 @@ export function ProductDetail() {
       .getPublicBySlug(slug)
       .then((p) => {
         setProduct(p);
-        setSelectedSku(p.variants[0]?.sku ?? null);
+        // Only auto-select when there's a single variant — with more than
+        // one, the customer must make an explicit choice (no silently
+        // defaulted variant going into a cart later).
+        setSelectedSku(p.variants.length === 1 ? p.variants[0].sku : null);
         setStatus('success');
       })
       .catch((err) => {
@@ -71,19 +78,38 @@ export function ProductDetail() {
     );
   }
 
-  const variant: ProductVariant | undefined =
-    product.variants.find((v) => v.sku === selectedSku) ?? product.variants[0];
+  const variant: ProductVariant | undefined = product.variants.find((v) => v.sku === selectedSku);
   const categoryName = typeof product.category === 'string' ? undefined : product.category.name;
+  const categoryId = typeof product.category === 'string' ? undefined : product.category._id;
   const cover = product.images[0];
+  const needsSelection = product.variants.length > 1;
+
+  const handleAddToCart = () => {
+    if (!variant) {
+      setSelectionError(true);
+      return;
+    }
+    setSelectionError(false);
+    setAddedToCart(true);
+    // Phase 6 owns the real cart (state, persistence, checkout). This is
+    // intentionally just a confirmation of a valid, in-stock selection —
+    // no cart state is created or persisted here.
+    setTimeout(() => setAddedToCart(false), 2500);
+  };
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      <Link to="/products" className="mb-6 inline-flex items-center gap-1 text-sm text-slate hover:text-ink">
-        <ChevronLeft size={16} /> Back to shop
-      </Link>
+      <Breadcrumbs
+        items={[
+          { label: 'Shop', to: '/products' },
+          ...(categoryName && categoryId ? [{ label: categoryName, to: `/categories/${categoryId}` }] : []),
+          { label: product.title },
+        ]}
+      />
 
       <div className="grid gap-10 md:grid-cols-2">
-        <div className="flex aspect-square items-center justify-center rounded-lg bg-slate-100">
+        <div className="relative flex aspect-square items-center justify-center rounded-lg bg-slate-100">
+          <WishlistButton productId={product._id} className="absolute right-3 top-3" />
           {cover ? (
             <img src={cover.url} alt={cover.alt ?? product.title} className="h-full w-full rounded-lg object-cover" />
           ) : (
@@ -95,6 +121,13 @@ export function ProductDetail() {
           {categoryName && <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate">{categoryName}</p>}
           <h1 className="text-2xl font-semibold text-ink">{product.title}</h1>
 
+          {product.vendorStore && (
+            <p className="mt-1 flex items-center gap-1 text-sm text-slate">
+              Sold by <span className="font-medium text-ink-soft">{product.vendorStore.storeName}</span>
+              {product.vendorStore.isVerified && <ShieldCheck size={13} className="text-indigo-500" />}
+            </p>
+          )}
+
           {variant && (
             <div className="mt-3 flex items-baseline gap-2">
               <span className="font-mono text-xl font-semibold text-ink">{formatPrice(variant.price)}</span>
@@ -103,22 +136,38 @@ export function ProductDetail() {
               )}
             </div>
           )}
+          {!variant && (
+            <p className="mt-3 font-mono text-xl font-semibold text-ink">
+              {product.priceRange.min === product.priceRange.max
+                ? formatPrice(product.priceRange.min)
+                : `${formatPrice(product.priceRange.min)} – ${formatPrice(product.priceRange.max)}`}
+            </p>
+          )}
 
           <p className="mt-4 text-sm leading-relaxed text-ink-soft">{product.description}</p>
 
-          {product.variants.length > 1 && (
+          {needsSelection && (
             <div className="mt-6">
-              <p className="mb-2 text-sm font-medium text-ink-soft">Options</p>
+              <p className="mb-2 text-sm font-medium text-ink-soft">
+                Options {selectionError && <span className="text-coral-600">— please select an option</span>}
+              </p>
               <div className="flex flex-wrap gap-2">
                 {product.variants.map((v) => (
                   <button
                     key={v.sku}
                     type="button"
-                    onClick={() => setSelectedSku(v.sku)}
+                    onClick={() => {
+                      setSelectedSku(v.sku);
+                      setSelectionError(false);
+                    }}
                     disabled={v.availableStock === 0}
                     className={cn(
                       'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                      v.sku === selectedSku ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-ink-soft hover:border-indigo-300'
+                      v.sku === selectedSku
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : selectionError
+                          ? 'border-coral-300'
+                          : 'border-slate-200 text-ink-soft hover:border-indigo-300'
                     )}
                   >
                     {v.attributes ? Object.values(v.attributes).join(' / ') : v.sku}
@@ -129,20 +178,35 @@ export function ProductDetail() {
           )}
 
           <div className="mt-6 flex items-center gap-3">
-            {variant && variant.availableStock === 0 ? (
-              <Badge tone="coral">Out of stock</Badge>
-            ) : variant && variant.availableStock <= 5 ? (
-              <Badge tone="marigold">Only {variant.availableStock} left</Badge>
+            {variant ? (
+              variant.availableStock === 0 ? (
+                <Badge tone="coral">Out of stock</Badge>
+              ) : variant.availableStock <= 5 ? (
+                <Badge tone="marigold">Only {variant.availableStock} left</Badge>
+              ) : (
+                <Badge tone="emerald">In stock</Badge>
+              )
             ) : (
-              <Badge tone="emerald">In stock</Badge>
+              <Badge tone="neutral">Select an option to see availability</Badge>
             )}
-            <span className="font-mono text-xs text-slate">SKU: {variant?.sku}</span>
+            {variant && <span className="font-mono text-xs text-slate">SKU: {variant.sku}</span>}
           </div>
 
-          <Button size="lg" className="mt-6" disabled={!variant || variant.availableStock === 0}>
-            Add to cart
+          <Button
+            size="lg"
+            className="mt-6"
+            onClick={handleAddToCart}
+            disabled={variant !== undefined && variant.availableStock === 0}
+          >
+            {addedToCart ? (
+              <>
+                <CheckCircle2 size={17} /> Added
+              </>
+            ) : (
+              'Add to cart'
+            )}
           </Button>
-          <p className="mt-2 text-xs text-slate">Cart and checkout arrive in Phase 6.</p>
+          <p className="mt-2 text-xs text-slate">Full cart and checkout arrive in Phase 6.</p>
         </div>
       </div>
     </div>

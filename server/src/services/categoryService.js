@@ -2,6 +2,7 @@ import { Category } from '../models/Category.model.js';
 import { Product } from '../models/Product.model.js';
 import { ApiError } from '../utils/ApiError.js';
 import { generateUniqueSlug } from '../utils/uniqueSlug.js';
+import { PRODUCT_STATUS } from '../constants/product.js';
 
 const MAX_PARENT_CHAIN_DEPTH = 20; // sane ceiling against a corrupted/cyclic chain
 
@@ -25,9 +26,27 @@ async function assertNoCycle(categoryId, proposedParentId) {
 }
 
 export const categoryService = {
-  async list({ includeInactive = false } = {}) {
+  async list({ includeInactive = false, withCounts = false } = {}) {
     const filter = includeInactive ? {} : { isActive: true };
-    return Category.find(filter).sort({ name: 1 });
+    const categories = await Category.find(filter).sort({ name: 1 });
+
+    if (!withCounts) return categories;
+
+    // One aggregation for every category's count, not one query per
+    // category (a naive per-category `Product.countDocuments` in a loop
+    // would be an N+1 query pattern) — see docs/DATABASE.md. Only active
+    // products count toward what a customer actually sees.
+    const counts = await Product.aggregate([
+      { $match: { status: PRODUCT_STATUS.ACTIVE } },
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+    ]);
+    const countByCategory = new Map(counts.map((c) => [c._id.toString(), c.count]));
+
+    return categories.map((category) => {
+      const plain = category.toObject();
+      plain.productCount = countByCategory.get(category._id.toString()) ?? 0;
+      return plain;
+    });
   },
 
   async getById(id) {

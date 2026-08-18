@@ -177,10 +177,13 @@ Unauthenticated. Returns process uptime and current MongoDB connection state —
 
 Public. Always active-only, regardless of any query sent.
 
+**Query params**: `withCounts` (`true`|`false`, default `false`) — adds a `productCount` field per category (active products only), computed with a single aggregation, not one query per category. Omit it and the response shape is identical to before this param existed.
+
 **200 OK**
 ```json
-{ "success": true, "data": { "categories": [ { "_id": "...", "name": "Electronics", "slug": "electronics", "parent": null, "isActive": true } ] } }
+{ "success": true, "data": { "categories": [ { "_id": "...", "name": "Electronics", "slug": "electronics", "parent": null, "isActive": true, "productCount": 12 } ] } }
 ```
+(`productCount` only present when `withCounts=true`.)
 
 ### `GET /categories/:id`
 
@@ -225,23 +228,25 @@ Two distinct surfaces: the **public storefront** (always active-only, no auth) a
 
 Public. Search, filter, sort, paginate — active products only.
 
-**Query params**: `q` (text search), `category` (id), `minPrice`, `maxPrice`, `sort` (`newest` | `price_asc` | `price_desc` | `rating`, default `newest`), `page` (default 1), `limit` (default 20, max 100).
+**Query params**: `q` (text search), `category` (id), `minPrice`, `maxPrice`, `inStock` (`true`|`false` — `true` matches products with at least one variant in stock, `false` matches products where every variant is at zero; omit to not filter by stock at all), `vendor` (id, filters to one seller's storefront listing), `sort` (`newest` | `price_asc` | `price_desc` | `rating`, default `newest`), `page` (default 1), `limit` (default 20, max 100).
+
+Every product in the response carries a `vendorStore` summary — the customer-facing store name/logo, looked up from the seller's `Vendor` profile (not the raw `vendor` field, which is a `User` id — see `docs/DATABASE.md` for why those are different collections). `vendorStore` is `null` if that vendor account hasn't completed onboarding (`POST /vendors/me`) yet; the product is still listed, just without a store byline.
 
 **200 OK**
 ```json
-{ "success": true, "data": { "products": [ { "_id": "...", "title": "...", "slug": "...", "priceRange": { "min": 19.99, "max": 24.99 }, "variants": [...] } ] },
+{ "success": true, "data": { "products": [ { "_id": "...", "title": "...", "slug": "...", "priceRange": { "min": 19.99, "max": 24.99 }, "variants": [...], "vendorStore": { "storeName": "Acme Supplies", "logo": null, "isVerified": true } } ] },
   "meta": { "page": 1, "limit": 20, "total": 42, "totalPages": 3 } }
 ```
 
 ### `GET /products/slug/:slug`
 
-Public. `404` if the product doesn't exist **or** isn't `active` — a draft or archived product is indistinguishable from a nonexistent one on this endpoint, by design.
+Public. `404` if the product doesn't exist **or** isn't `active` — a draft or archived product is indistinguishable from a nonexistent one on this endpoint, by design. Same `vendorStore` enrichment as the listing.
 
 ### `GET /products/manage`
 
 Requires `vendor` or `super_admin`. Vendor sees only their own products, any status. Admin may pass `?vendor=<id>` to filter to one vendor, or omit it to see everything.
 
-Same query params as the public listing, plus `status` (filter by draft/active/archived — vendor and admin only, since the public listing is always active-only anyway).
+Same query params as the public listing (including `inStock`), plus `status` (filter by draft/active/archived — vendor and admin only, since the public listing is always active-only anyway). Managed responses do **not** include `vendorStore` — a vendor/admin managing their own listing doesn't need a storefront-branded summary of themselves.
 
 ### `GET /products/manage/:id`
 
@@ -402,6 +407,44 @@ Requires `super_admin`. Independent of the status transitions above —
 callable regardless of current status.
 
 **Body**: `{ "isVerified": true }` (or `false` to revoke).
+
+---
+
+## Users
+
+Self-service only — there is no endpoint here (or anywhere in the app) that takes a user id from the client. Reading the current user is `GET /auth/me` (Phase 2); this is only the write side.
+
+### `PATCH /users/me`
+
+Requires authentication (any role).
+
+**Body**: partial — any subset of `name`, `phone`. `role`, `email`, `isActive`, `isEmailVerified`, and every password/token field are absent from the schema, not merely rejected — there's no code path that could let one through (see `docs/SECURITY.md` §5).
+
+**200 OK** — `data.user`
+
+**Errors**: `400` validation failure (e.g. malformed phone number) · `401` no token
+
+---
+
+## Wishlist
+
+Requires the `customer` role specifically — not "any authenticated user," matching how the rest of the app scopes role-flavored features (e.g. Phase 4's `/vendors/me`). Every route is scoped to the caller server-side; none ever takes a user id from the client.
+
+### `GET /wishlist`
+
+**200 OK** — `data.products`, an array of full product objects (only the fields a wishlist card needs: title, slug, images, priceRange, status, variants — never vendor/admin-internal fields).
+
+### `POST /wishlist/:productId`
+
+Adds a product. Adding an already-wishlisted product is a harmless no-op (`200`, not `409`) — a second click on a filled-in heart icon behaves the same as the first.
+
+**Errors**: `404` product doesn't exist · `403` non-customer role
+
+### `DELETE /wishlist/:productId`
+
+Removes a product. Removing something not on the list is also a no-op, not an error.
+
+Both add/remove return the updated `data.products` array — the frontend never needs a separate re-fetch after a mutation.
 
 ---
 

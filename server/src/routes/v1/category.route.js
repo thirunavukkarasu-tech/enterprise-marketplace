@@ -9,12 +9,13 @@ import {
   createCategorySchema,
   updateCategorySchema,
   categoryIdParamSchema,
+  listCategoriesQuerySchema,
 } from '../../validators/category.validator.js';
 
 const router = Router();
 
 // ── public ───────────────────────────────────────────────────────────────
-router.get('/', asyncHandler(categoryController.list));
+router.get('/', validate(listCategoriesQuerySchema), asyncHandler(categoryController.list));
 router.get('/:id', validate(categoryIdParamSchema), asyncHandler(categoryController.getById));
 
 // ── admin only ───────────────────────────────────────────────────────────

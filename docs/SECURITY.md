@@ -1,9 +1,10 @@
 # Security — MarketSphere
 
 > Status note: Phases 2 (Authentication & RBAC), 3 (Product & Category
-> Management), and 4 (Vendor Management) are implemented — §1–§5 below
-> describe what's actually running, not a plan. §9 onward remain
-> forward-looking, as noted per section.
+> Management), 4 (Vendor Management), and 5 (Customer Shopping
+> Experience) are implemented — §1–§6 below describe what's actually
+> running, not a plan. §10 onward remain forward-looking, as noted per
+> section.
 
 ## 1. Authentication (Phase 2 — implemented)
 
@@ -145,7 +146,62 @@ this authenticated user."
   `400` even from an authenticated admin — the only legal transitions are
   the ones spelled out in that table.
 
-## 5. Input validation
+## 5. Customer-facing authorization & safe data exposure (Phase 5 — implemented)
+
+Phase 5 introduces the first genuinely public, unauthenticated read
+surface with real business data behind it (the storefront catalog), plus
+two more self-service-only resources (wishlist, account profile). Same
+questions as every prior phase, applied to a different surface:
+
+- **Wishlist and profile endpoints use the same route-separation pattern
+  Phase 4 established for vendors** — `GET/PATCH /users/me` and
+  `GET/POST/DELETE /wishlist[/:productId]` never take a user id from the
+  client at all; the identity is always `req.user.id` from the verified
+  access token. There is no route where an authenticated customer can
+  address *another* customer's profile or wishlist by id, because no
+  such route exists — not because a check happens to catch it.
+- **Wishlisting is scoped to the `customer` role specifically**, not "any
+  authenticated user," the same way `/vendors/me` is vendor-only — a
+  vendor or admin account calling `/wishlist` gets a `403`, not an empty
+  list. This matches how the rest of the app treats role-flavored
+  features rather than treating "authenticated" as a single tier.
+- **The public catalog only ever exposes customer-safe product fields.**
+  Wishlist responses are populated with an explicit field allow-list
+  (`title slug images priceRange status variants` — see
+  `wishlistService.js`), never the full product document. Public listing/
+  detail responses attach a `vendorStore` summary (`storeName`, `logo`,
+  `isVerified`) built from an explicit `.select()` on the `Vendor`
+  collection — never the vendor's `businessEmail`, `businessPhone`,
+  `address`, `taxId`, or any of the admin-only moderation fields
+  (`rejectionReason`, `suspensionReason`, `reviewedBy`) documented in
+  §4. A customer looking at a product listing has no way to see anything
+  about the seller beyond what a real storefront would show on a
+  "sold by" byline.
+- **Mass assignment on the profile endpoint** follows the same
+  double-layer pattern as Phases 3–4: `updateOwnUserSchema` has no field
+  for `role`, `email`, `isActive`, `isEmailVerified`, or any
+  password/token property, and `userService.updateOwnProfile` writes
+  through an explicit `SELF_EDITABLE_FIELDS` allow-list
+  (`['name', 'phone']`), never a raw `req.body` merge. A user cannot
+  escalate their own role or reactivate a deactivated account by sending
+  extra fields on this endpoint — verified directly in
+  `tests/integration/customerExperience.test.js`.
+- **Query parameters that reach a database filter are validated, not
+  passed through.** `sort` is a closed enum (`newest`/`price_asc`/
+  `price_desc`/`rating`) mapped server-side to a fixed sort spec
+  (`SORT_MAP` in `product.repository.js`) — the client sends a name, never
+  a Mongo sort expression, so there's no path to inject an arbitrary sort
+  document. `inStock` is a strict `'true'|'false'` enum coerced to a real
+  boolean; anything else is a `400`, not silently ignored or coerced to a
+  truthy guess.
+- **Guests can browse everything the catalog exposes without an
+  account.** `GET /products`, `GET /products/slug/:slug`,
+  `GET /categories`, and `GET /categories/:id` have no `requireAuth` at
+  all — the authorization boundary is "is this product/category
+  publicly visible" (its own `status`/`isActive` field), not "is there a
+  valid session."
+
+## 6. Input validation
 
 - Every request body passes through a Zod schema (`validators/`) before
   reaching a controller. Validation failures return a `400` with
@@ -159,7 +215,7 @@ this authenticated user."
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 6. Transport & headers
+## 7. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -170,7 +226,7 @@ this authenticated user."
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 7. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 8. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -182,7 +238,7 @@ this authenticated user."
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 8. Error handling
+## 9. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -191,7 +247,7 @@ this authenticated user."
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 9. File uploads (not yet implemented)
+## 10. File uploads (not yet implemented)
 
 - Uploads (product images, vendor logo/banner, KYC documents) are
   validated by MIME-type allowlist and size limit before being forwarded
@@ -202,7 +258,7 @@ this authenticated user."
   handling uploads directly — no domain in the app owns file-upload
   infrastructure yet.
 
-## 10. Secrets
+## 11. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -210,7 +266,7 @@ this authenticated user."
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 11. Audit logging (Phase 10 — not yet implemented)
+## 12. Audit logging (Phase 10 — not yet implemented)
 
 A dedicated, queryable `AuditLog` collection (actor, action, target,
 timestamp) is planned for Phase 10, alongside the admin tooling that would
@@ -223,7 +279,7 @@ tracking, but it is **not** a substitute for the real audit trail: it's
 unstructured relative to a query-able collection and isn't retained
 independently of normal log rotation.
 
-## 12. What's intentionally deferred
+## 13. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and
