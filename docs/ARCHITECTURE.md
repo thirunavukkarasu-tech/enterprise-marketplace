@@ -31,7 +31,14 @@ routes → controllers → services → repositories (where useful) → models
 - **services** — own business logic: order splitting across vendors,
   inventory reservation, coupon validation, refund workflows. Services can
   call other services (e.g. `orderService` calls `inventoryService`), but
-  controllers never skip services to reach a model directly.
+  controllers never skip services to reach a model directly. Where a
+  calculation needs to be identical across multiple call sites, it lives
+  in exactly one function, called by every caller — not reimplemented per
+  controller. `cartPricingService.calculateTotals` (Phase 6) is the
+  concrete example: `cartService` (cart retrieval) and `checkoutService`
+  (checkout review) both call it, and Phase 7's order creation is
+  expected to as well, rather than any of the three recomputing subtotal/
+  discount/tax/shipping logic on their own.
 - **repositories** — introduced only where a model's queries are complex
   enough to be worth isolating (e.g. product search/filtering, order
   aggregation for analytics). Simple CRUD models are queried directly from
@@ -83,13 +90,19 @@ bottom tabs) because delivery partners work from a phone in the field, not
 a desktop — that's a real UX difference, not an arbitrary one.
 
 **State**: Redux Toolkit holds cross-cutting, multi-screen state — session
-(Phase 2), wishlist (Phase 5). The test applied consistently since Phase 1
-isn't "is this server data" but "does the same fact need to render
-consistently in more than one place at once." Wishlist membership is the
-clearest example: the same "is this product saved" fact has to show up on
-a product card in a grid *and* the detail page *and* a header badge count,
-all simultaneously — that's what makes it a Redux slice
-(`features/wishlist/wishlistSlice.ts`) rather than a fetch hook. Product/
+(Phase 2), wishlist (Phase 5), cart (Phase 6). The test applied consistently
+since Phase 1 isn't "is this server data" but "does the same fact need to
+render consistently in more than one place at once." Wishlist membership
+and cart contents are the clearest examples: the same "is this product
+saved" or "how many items are in my cart" fact has to show up on a
+product card in a grid *and* the detail page *and* a header badge count,
+all simultaneously — that's what makes them Redux slices
+(`features/wishlist/wishlistSlice.ts`, `features/cart/cartSlice.ts`)
+rather than fetch hooks. Both slices independently react to
+`logoutUser.fulfilled` (imported from `authSlice`, not the other way
+around) so a signed-out session doesn't keep showing the previous
+customer's data — one-directional dependency, Phase 2's `authSlice.ts`
+never needs to know either of them exists. Product/
 category browsing, by contrast, stays screen-local (`useProducts`,
 `useCategories` — plain hooks over `useState`/`useEffect`, not slices):
 a product listing's filters and results are read once per page visit and

@@ -9,8 +9,8 @@
 | 3 | Product & category management | ✅ Complete |
 | 4 | Vendor management | ✅ Complete |
 | 5 | Customer shopping experience | ✅ Complete |
-| 6 | Cart & checkout | ⏳ Next |
-| 7 | Orders, inventory & payments | Planned |
+| 6 | Cart & checkout | ✅ Complete |
+| 7 | Orders, inventory & payments | ⏳ Next |
 | 8 | Delivery & real-time tracking | Planned |
 | 9 | Reviews, coupons & notifications | Planned |
 | 10 | Analytics, audit logs, testing & hardening | Planned |
@@ -157,16 +157,79 @@
   and ready to run against a real MongoDB instance; see `README.md` for
   how
 
-## Phase 6 preview — Cart & Checkout
+## Phase 6 summary — Cart & Checkout (complete)
 
-- A real `Cart` model (schema already drafted in `docs/DATABASE.md`,
-  not yet built) replacing Phase 5's confirmation-only "Add to cart"
-  interaction
-- Stock reservation writing to `reservedStock` for the first time (the
-  field has existed on every product variant since Phase 3, always `0`
-  until now)
-- Checkout flow up to — but not including — real payment processing
-  (Phase 7 owns the payment abstraction)
+- `Cart` model — one per customer, embedded mutable items, a
+  `priceSnapshot` per item used only for change-detection display, never
+  for billing (see `docs/DATABASE.md`); `Address` model — a genuinely
+  referenced (not embedded) per-customer list, since checkout needs to
+  address one specifically by id independent of the others
+- **A single, reusable server-side pricing calculation path**
+  (`cartPricingService.calculateTotals`), called by both cart retrieval
+  and checkout review rather than duplicated — Phase 7's order creation
+  is expected to call the same function rather than reimplementing
+  subtotal/discount/tax/shipping math a third time (see
+  `docs/ARCHITECTURE.md`)
+- **Nothing about price, subtotal, or total is ever trusted from the
+  client** — the add/update cart schemas have no field for any of them at
+  all, not merely a rejected one; every total is recomputed from live
+  `Product`/variant data on every read
+- Price-change detection: a per-item price is compared against its
+  stored snapshot on every cart/checkout read; a change is non-blocking
+  (checkout can still proceed) but surfaced with the exact customer-facing
+  message the spec called for: *"One or more item prices have changed.
+  Please review your cart before checkout."*
+- Stock validated server-side on every mutation (add, update, checkout
+  review) against live `variant.availableStock` — never trusted from
+  what was true when an item was added
+- **Inventory reservation policy, stated explicitly**: cart quantity is
+  *not* a stock reservation. Nothing in Phase 6 decrements `stock` or
+  increments `reservedStock`; two customers can simultaneously hold the
+  last unit of a SKU in their carts, and only one will succeed — that
+  moment is Phase 7's order-creation transaction, not anything cart or
+  checkout does. Full reasoning in `docs/DATABASE.md`.
+- Checkout review (`POST /checkout/review`) is the boundary Phase 7 is
+  expected to build on: validates cart + addresses, returns
+  server-calculated totals, **creates nothing** — no order, no cart
+  status change, no inventory touch
+- Frontend: cart page (quantity controls, per-item issue messaging,
+  price-change warning, blocking-issue gating on the checkout CTA), a
+  4-step checkout UI (contact → shipping → delivery → review) that
+  clearly labels its final action "Place order (coming soon)" rather
+  than implying it does something it doesn't, address management reused
+  as both a standalone page and an inline checkout step via one shared
+  `AddressForm` component
+- Redux used for cart the same way Phase 5 used it for wishlist — the
+  same "how many items are in my cart" fact renders in a header badge,
+  the cart page, and checkout simultaneously — while checkout's own
+  multi-step UI state stays local to that page, not globalized
+- **Two real integration gaps found and fixed while wiring this phase
+  together, not left as silent TODOs**: the Cart/Checkout/Addresses pages
+  were fully built but never connected to the router (`/cart` still
+  pointed at a Phase 1 placeholder, `/checkout` and `/addresses` had no
+  route at all); a product detail page's "add to cart" button didn't
+  disable during the request or display a failure message despite
+  fetching both pieces of state, purely because the JSX using them was
+  never finished
+- 27 new passing unit tests (pricing calculation math, cart/checkout/
+  address Zod validators) + a comprehensive integration suite covering
+  every item in the spec's minimum test list, including cross-customer
+  cart isolation, vendor/admin blocked from cart access, price/quantity
+  manipulation rejection, and address ownership — written and ready to
+  run against a real MongoDB instance; see `README.md` for how
+
+## Phase 7 preview — Orders, Inventory & Payments
+
+- Real order creation from a validated checkout review — using the
+  `cartPricingService.calculateTotals` function this phase already
+  built, not a fourth reimplementation of the same math
+- Atomic/transactional inventory deduction at the moment of order
+  creation — the first thing in this app to actually write to
+  `reservedStock`/`stock`, replacing Phase 6's re-check-every-time,
+  reserve-nothing policy
+- `Cart.status` transitioning from `active` to `converted` for the first
+  time — the field has existed since Phase 6, unset by anything until now
+- The payment abstraction layer described in `docs/ARCHITECTURE.md` §7
 
 ## Beyond Phase 11 — future improvements
 

@@ -1,5 +1,5 @@
 import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
-import { LogOut, LayoutDashboard, Heart, UserCircle } from 'lucide-react';
+import { LogOut, LayoutDashboard, Heart, UserCircle, ShoppingCart } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
 import { Button } from '../components/ui/Button';
 import { useAppDispatch, useAppSelector } from '../hooks/useAppStore';
@@ -16,6 +16,7 @@ const navLinks = [
 export function StorefrontLayout() {
   const { user, status } = useAppSelector((state) => state.auth);
   const wishlistCount = useAppSelector((state) => state.wishlist.productIds.length);
+  const cartCount = useAppSelector((state) => state.cart.cart?.itemCount ?? 0);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
 
@@ -61,6 +62,16 @@ export function StorefrontLayout() {
                     {wishlistCount > 0 && (
                       <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 font-mono text-[10px] text-white">
                         {wishlistCount}
+                      </span>
+                    )}
+                  </Link>
+                )}
+                {user.role === 'customer' && (
+                  <Link to="/cart" className="relative flex h-9 w-9 items-center justify-center rounded-md text-ink-soft hover:bg-slate-100" aria-label="Cart">
+                    <ShoppingCart size={18} />
+                    {cartCount > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-indigo-500 px-1 font-mono text-[10px] text-white">
+                        {cartCount}
                       </span>
                     )}
                   </Link>

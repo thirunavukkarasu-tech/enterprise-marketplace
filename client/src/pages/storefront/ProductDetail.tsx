@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ImageOff, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { productApi } from '../../features/catalog/productApi';
+import { addCartItem } from '../../features/cart/cartSlice';
+import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
 import type { Product, ProductVariant } from '../../types/catalog';
 import { Spinner } from '../../components/common/Spinner';
 import { ErrorState } from '../../components/common/ErrorState';
@@ -19,12 +21,16 @@ type Status = 'loading' | 'success' | 'error' | 'not-found';
 
 export function ProductDetail() {
   const { slug } = useParams<{ slug: string }>();
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((s) => s.auth);
+  const cartMutating = useAppSelector((s) => s.cart.mutating);
   const [product, setProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [selectedSku, setSelectedSku] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
+  const [cartError, setCartError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -84,17 +90,29 @@ export function ProductDetail() {
   const cover = product.images[0];
   const needsSelection = product.variants.length > 1;
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!variant) {
       setSelectionError(true);
       return;
     }
     setSelectionError(false);
-    setAddedToCart(true);
-    // Phase 6 owns the real cart (state, persistence, checkout). This is
-    // intentionally just a confirmation of a valid, in-stock selection —
-    // no cart state is created or persisted here.
-    setTimeout(() => setAddedToCart(false), 2500);
+    setCartError(null);
+
+    if (!user || user.role !== 'customer') {
+      // Cart is a customer-role feature server-side (see
+      // server/src/routes/v1/cart.route.js) — guests and other roles are
+      // told plainly rather than sent into a request that would 401/403.
+      setCartError(user ? 'Only customer accounts have a cart.' : 'Sign in as a customer to add items to your cart.');
+      return;
+    }
+
+    const result = await dispatch(addCartItem({ productId: product!._id, sku: variant.sku, quantity: 1 }));
+    if (addCartItem.fulfilled.match(result)) {
+      setAddedToCart(true);
+      setTimeout(() => setAddedToCart(false), 2500);
+    } else {
+      setCartError((result.payload as string) ?? 'Could not add this item to your cart.');
+    }
   };
 
   return (
@@ -196,17 +214,25 @@ export function ProductDetail() {
             size="lg"
             className="mt-6"
             onClick={handleAddToCart}
-            disabled={variant !== undefined && variant.availableStock === 0}
+            disabled={cartMutating || (variant !== undefined && variant.availableStock === 0)}
           >
             {addedToCart ? (
               <>
                 <CheckCircle2 size={17} /> Added
               </>
+            ) : cartMutating ? (
+              'Adding…'
             ) : (
               'Add to cart'
             )}
           </Button>
-          <p className="mt-2 text-xs text-slate">Full cart and checkout arrive in Phase 6.</p>
+          {cartError && <p className="mt-2 text-xs text-coral-600">{cartError}</p>}
+          <p className="mt-2 text-xs text-slate">
+            <Link to="/cart" className="text-indigo-600 hover:underline">
+              View cart
+            </Link>{' '}
+            to review items and proceed to checkout.
+          </p>
         </div>
       </div>
     </div>

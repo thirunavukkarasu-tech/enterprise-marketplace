@@ -1,10 +1,10 @@
 # Security — MarketSphere
 
 > Status note: Phases 2 (Authentication & RBAC), 3 (Product & Category
-> Management), 4 (Vendor Management), and 5 (Customer Shopping
-> Experience) are implemented — §1–§6 below describe what's actually
-> running, not a plan. §10 onward remain forward-looking, as noted per
-> section.
+> Management), 4 (Vendor Management), 5 (Customer Shopping Experience),
+> and 6 (Cart & Checkout) are implemented — §1–§7 below describe what's
+> actually running, not a plan. §11 onward remain forward-looking, as
+> noted per section.
 
 ## 1. Authentication (Phase 2 — implemented)
 
@@ -201,7 +201,75 @@ questions as every prior phase, applied to a different surface:
   publicly visible" (its own `status`/`isActive` field), not "is there a
   valid session."
 
-## 6. Input validation
+## 6. Cart, checkout & address security (Phase 6 — implemented)
+
+Cart and checkout are the first place this app calculates money, which
+makes price/quantity manipulation the primary threat model rather than
+just another IDOR surface. Every requirement below maps to something
+`tests/integration/cartCheckout.test.js` exercises directly, not just an
+intention:
+
+- **The server is the only source of truth for price, subtotal, and
+  total — structurally, not just by convention.** `addCartItemSchema`
+  and `updateCartItemSchema` (`validators/cart.validator.js`) have no
+  field for `price`, `subtotal`, `discountAmount`, or `total` at all.
+  Sending them does nothing — they're not validated-then-rejected, they
+  never reach the service layer to begin with, the same "can't get there
+  from here" guarantee Phase 4 established for admin-only vendor fields.
+  Every total in every cart/checkout response is computed by
+  `cartPricingService.calculateTotals`, which takes freshly-hydrated
+  items re-read from the live `Product` collection — never a stored
+  total, never a client-supplied one.
+- **Price snapshots are for display, never for billing.**
+  `CartItem.priceSnapshot` exists solely so the UI can show "price
+  changed since you added this" — `hydrateCartItems` always prices the
+  line at `variant.price` (the current live price), and flags
+  `PRICE_CHANGED` as informational, non-blocking metadata. There is no
+  code path in this app that charges a snapshot price.
+- **Quantity is server-validated against live stock on every mutation,
+  not just once at add-time.** Adding, updating, and reviewing checkout
+  all independently re-check `quantity <= variant.availableStock` against
+  the database at that moment — a quantity that was valid when added can
+  still be rejected later if stock changed, rather than trusting
+  whatever was true when the line item was created. A fixed per-item cap
+  (`MAX_CART_ITEM_QUANTITY`) is enforced independently of stock, as a
+  guard against a fat-fingered or scripted absurd quantity.
+- **Cart, address, and checkout all use the same IDOR-structural pattern**
+  established across Phases 4–5, applied per-resource-shape:
+  - Cart is a *singleton per user* (route-separation style, like Vendor
+    profiles/Wishlist) — every cart route resolves to `req.user.id`'s
+    cart; no route takes a cart id or another user's id at all.
+  - Address is a *list resource* (ownership-scoped-query style, like
+    Products) — every lookup is one query,
+    `{ _id: addressId, user: userId }`, never a bare `findById` followed
+    by a separate check. A request for another customer's address id
+    returns `404`, the same response as an address that doesn't exist —
+    it never confirms the id belongs to someone else.
+  - Checkout's address selection reuses `addressService.assertOwned`
+    rather than re-implementing an ownership check — a customer cannot
+    check out against an address id that isn't theirs even if they
+    correctly guess or enumerate one that exists.
+- **Cart and checkout are restricted to the `customer` role specifically**,
+  not "any authenticated user" — a vendor or admin token gets `403` on
+  every cart/address/checkout route, matching how the rest of the app
+  scopes role-flavored features rather than treating "authenticated" as
+  one tier (verified directly: "a vendor cannot access the cart
+  endpoints," "an admin cannot access the cart endpoints either").
+- **Checkout review never persists anything and never touches
+  inventory** — see the inventory reservation policy in
+  `docs/DATABASE.md`. This isn't a performance optimization; it's a
+  security-relevant boundary: nothing in Phase 6 can be used to lock,
+  reserve, or otherwise deny stock to other customers by repeatedly
+  calling checkout review without ever completing a purchase.
+- **Discount and tax have no input surface at all in Phase 6.**
+  `calculateDiscount`/`calculateTax` in `cartPricingService.js` are pure
+  functions with no request-derived input — there is no field anywhere
+  in the cart/checkout request schemas for a discount code, discount
+  amount, or tax amount. When Phase 9's coupon engine lands, it changes
+  what `calculateDiscount` returns; it does not add a new place for a
+  client to submit a number that becomes someone's bill.
+
+## 7. Input validation
 
 - Every request body passes through a Zod schema (`validators/`) before
   reaching a controller. Validation failures return a `400` with
@@ -215,7 +283,7 @@ questions as every prior phase, applied to a different surface:
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 7. Transport & headers
+## 8. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -226,7 +294,7 @@ questions as every prior phase, applied to a different surface:
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 8. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 9. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -238,7 +306,7 @@ questions as every prior phase, applied to a different surface:
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 9. Error handling
+## 10. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -247,7 +315,7 @@ questions as every prior phase, applied to a different surface:
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 10. File uploads (not yet implemented)
+## 11. File uploads (not yet implemented)
 
 - Uploads (product images, vendor logo/banner, KYC documents) are
   validated by MIME-type allowlist and size limit before being forwarded
@@ -258,7 +326,7 @@ questions as every prior phase, applied to a different surface:
   handling uploads directly — no domain in the app owns file-upload
   infrastructure yet.
 
-## 11. Secrets
+## 12. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -266,7 +334,7 @@ questions as every prior phase, applied to a different surface:
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 12. Audit logging (Phase 10 — not yet implemented)
+## 13. Audit logging (Phase 10 — not yet implemented)
 
 A dedicated, queryable `AuditLog` collection (actor, action, target,
 timestamp) is planned for Phase 10, alongside the admin tooling that would
@@ -279,7 +347,7 @@ tracking, but it is **not** a substitute for the real audit trail: it's
 unstructured relative to a query-able collection and isn't retained
 independently of normal log rotation.
 
-## 13. What's intentionally deferred
+## 14. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and

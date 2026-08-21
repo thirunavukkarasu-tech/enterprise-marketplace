@@ -448,9 +448,91 @@ Both add/remove return the updated `data.products` array — the frontend never 
 
 ---
 
+## Cart
+
+Requires the `customer` role specifically (same reasoning as Wishlist). Every route is scoped to `req.user.id` server-side — no route here ever takes a user id from the client, so there's no request shape that could return or modify another customer's cart.
+
+**Every price, subtotal, and total in every response below is calculated server-side from the live `Product`/variant data — never from anything the client sends.** `POST`/`PATCH` bodies only ever contain `productId`, `sku`, and `quantity`. Sending `price`, `subtotal`, `discountAmount`, or `total` in a request body has no effect — those fields don't exist in the validation schema, so they're silently ignored, not merely rejected.
+
+### `GET /cart`
+
+**Query params**: `shippingMethod` (`standard`|`express`, optional — affects the returned `shippingFee`/`grandTotal` preview; doesn't change anything stored).
+
+**200 OK**
+```json
+{ "success": true, "data": { "cart": {
+  "cartId": "...", "items": [ { "itemId": "...", "product": "...", "sku": "...", "quantity": 2, "title": "...", "currentPrice": 19.99, "availableStock": 8, "issue": null, "lineSubtotal": 39.98 } ],
+  "itemCount": 2, "subtotal": 39.98, "discountAmount": 0, "taxAmount": 0, "shippingMethod": "standard", "shippingFee": 0, "grandTotal": 39.98,
+  "hasBlockingIssues": false, "hasPriceChanges": false, "priceChangeMessage": null
+} } }
+```
+A cart is created automatically (empty) the first time a customer's cart is requested — there's no separate "create cart" step. Every item carries an `issue` (`null`, or one of `product_unavailable`, `variant_unavailable`, `out_of_stock`, `insufficient_stock`, `price_changed`) so the frontend can explain *why* a line item isn't contributing to the total, rather than silently dropping it.
+
+### `POST /cart/items`
+
+**Body**: `{ "productId": "...", "sku": "...", "quantity": 1 }` (`quantity` defaults to 1, max 20 per item — see `MAX_CART_ITEM_QUANTITY`).
+
+Adding a product/sku combination already in the cart **increments** the existing line's quantity rather than creating a duplicate row — validated against live stock as the new combined total, not just the delta.
+
+**Errors**: `400` product doesn't exist, isn't active, the SKU doesn't exist on it, or the requested quantity (existing + new) exceeds available stock or the max-per-item cap.
+
+### `PATCH /cart/items/:itemId`
+
+**Body**: `{ "quantity": 3 }` — sets the quantity directly (not a delta). Re-validated against live stock at the moment of the request, since it may have sold down since the item was added.
+
+### `DELETE /cart/items/:itemId`
+
+Removes one line item. Idempotent — removing an item that's already gone returns `200`, not `404`.
+
+### `DELETE /cart`
+
+Empties the cart entirely. Same idempotent behavior.
+
+---
+
+## Addresses
+
+Requires the `customer` role. Every lookup is scoped `{ _id: addressId, user: userId }` in one query — never a `findById` followed by a separate ownership check — so a customer addressing another customer's address id gets a `404`, not a `403` that would confirm the id exists.
+
+### `GET /addresses` · `GET /addresses/:id` · `POST /addresses` · `PATCH /addresses/:id` · `DELETE /addresses/:id`
+
+Standard CRUD, customer-owned. A customer's *first* saved address automatically becomes both the default shipping and default billing address — saves a click for the common single-address case without silently overriding a later, deliberate choice.
+
+**Body** (`POST`/`PATCH`): `label` (`home`|`work`|`other`), `fullName`, `phone`, `line1`, `line2` (optional), `city`, `state`, `country`, `postalCode`.
+
+### `PATCH /addresses/:id/default-shipping` · `PATCH /addresses/:id/default-billing`
+
+No body. Clears the flag from any other address of this customer's first, so at most one address ever has each flag set.
+
+---
+
+## Checkout
+
+Requires the `customer` role. A single review endpoint, not a stateful multi-step server session — the frontend's multi-step UI (contact → shipping → delivery → review) is presentation only; every step's data is sent together in one request here.
+
+### `POST /checkout/review`
+
+**Body**: `{ "shippingAddressId": "...", "billingAddressId": "... (optional, defaults to shippingAddressId)", "shippingMethod": "standard | express (optional, defaults to standard)" }`
+
+Recalculates the cart from scratch (same pricing path as `GET /cart`) and validates the address ids belong to the caller. **Does not create an order, does not touch inventory, does not change cart status** — this is the checkout boundary Phase 7's order creation is expected to build on, not order creation itself.
+
+**200 OK**
+```json
+{ "success": true, "message": "Checkout summary ready", "data": { "checkout": {
+  "...cart fields as above...",
+  "shippingAddress": { "...": "..." }, "billingAddress": { "...": "..." },
+  "canProceed": true, "reviewedAt": "2026-08-20T..."
+} } }
+```
+`canProceed` is `false` if any cart item has a blocking issue (out of stock, no longer available) — a non-blocking price change alone doesn't block proceeding, but `hasPriceChanges`/`priceChangeMessage` are still set so the frontend can require the customer to see and acknowledge it.
+
+**Errors**: `400` empty cart · `404` the address id doesn't belong to the caller (never reveals whether it belongs to someone else instead)
+
+---
+
 ## Coming in later phases
 
-Order, cart, coupon, review, delivery, and analytics endpoints are
-added as their respective phases ship (see `docs/ROADMAP.md`). This
-document grows alongside the code that actually implements each route —
-it does not describe endpoints ahead of their implementation.
+Order, coupon, review, delivery, and analytics endpoints are added as
+their respective phases ship (see `docs/ROADMAP.md`). This document
+grows alongside the code that actually implements each route — it does
+not describe endpoints ahead of their implementation.

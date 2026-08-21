@@ -212,19 +212,68 @@ Order items are embedded as **price/title snapshots**, not live references
 — an order must show what was actually charged even if the product is
 later repriced or deleted.
 
-### Cart
+### Cart — **implemented in Phase 6**
 ```
 Cart {
   _id
-  customer   ref → User (unique, indexed)
-  items      [ { product ref, variantSku, qty } ]   // embedded, mutable
-  updatedAt
+  user            ref → User (unique, indexed)
+  items           [ { product ref, sku, quantity, priceSnapshot, addedAt } ]  // embedded, mutable
+  status          enum: active | converted   // Phase 6 never sets converted — see below
+  createdAt / updatedAt
 }
 ```
-Still Phase 6's to build — see the note in the Roadmap. Phase 5's
-storefront has a confirmation-only "Add to cart" interaction (a client-side
-"Added ✓" state, nothing persisted) precisely so this schema isn't built
-twice against two different sets of requirements.
+One document per customer, embedded mutable items — same reasoning as
+Wishlist just below: always read/written as one unit, reasonably
+bounded, nothing needs to query "who has product X in their cart"
+independently of a specific customer.
+
+**`priceSnapshot` is not authoritative — it exists purely for
+change-detection display.** Every total this app calculates or would
+ever charge re-reads the live `Product.variants[].price` at request time
+(`cartPricingService.hydrateCartItems`); nothing is ever billed from a
+stored snapshot. Storing an authoritative total on this document would
+let it drift from reality the instant a vendor reprices a product —
+deriving every total on every read means it structurally can't.
+
+**`sku`, not a separate variant id** — Product has no independent
+variant-id field (see the Product section above); SKU is the addressable
+identifier for a variant everywhere in this app, and Cart follows the
+same convention rather than inventing a second one.
+
+**`status: converted` is defined now, set by nothing in Phase 6.** It
+exists so Phase 7 has somewhere to record "this cart became an order"
+without a schema migration when that phase ships — Phase 6's checkout
+review (`POST /checkout/review`) is read-only and never transitions a
+cart's status, consistent with the inventory-reservation boundary below.
+
+### Address — **implemented in Phase 6**
+```
+Address {
+  _id
+  user             ref → User (indexed)
+  label            enum: home | work | other
+  fullName, phone
+  line1, line2, city, state, country, postalCode
+  isDefaultShipping, isDefaultBilling   boolean
+  createdAt / updatedAt
+}
+```
+A **separate, referenced collection**, not embedded on `User` — unlike
+Cart/Wishlist, a customer can have *several* addresses and needs to
+address one specifically by id (checkout picks one; the address list
+page edits/deletes one independently of the others). That's the
+"queried/managed independently" case §1's embedding rule calls out for
+referencing rather than embedding — the same reasoning, opposite
+conclusion, from the same rule Cart and Wishlist apply.
+
+Indexed on `user` (list/ownership queries) and the compound
+`{ user, isDefaultShipping }` / `{ user, isDefaultBilling }` pairs (the
+"find this customer's default address" lookup checkout runs on every
+review). `addressService` clears the previous default before setting a
+new one, so at most one document per user ever has each flag `true` in
+practice — not enforced as a schema-level uniqueness constraint (a
+partial unique index would be one more thing to keep in sync with the
+service logic for a guarantee the service already provides).
 
 ### Wishlist — **implemented in Phase 5**
 ```
@@ -259,12 +308,29 @@ list.
 ### Inventory
 Stock lives on `Product.variants[].stock` for simple reads, with a
 `reservedStock` counterpart already on the same subdocument (added in
-Phase 3, held at `0` until Phase 6/7 checkout writes to it — see the
-Product section above). A companion **`InventoryLedger`** collection
-(separate, append-only, Phase 7) will record every stock change
-(`reserve`, `release`, `adjust`, `sale`) — the audit trail a real
-e-commerce system needs to explain "why does this SKU show 4 units" is a
-query problem, not something that belongs on the product document itself.
+Phase 3, still held at `0` after Phase 6 — see the policy note below).
+A companion **`InventoryLedger`** collection (separate, append-only,
+Phase 7) will record every stock change (`reserve`, `release`, `adjust`,
+`sale`) — the audit trail a real e-commerce system needs to explain "why
+does this SKU show 4 units" is a query problem, not something that
+belongs on the product document itself.
+
+**Inventory reservation policy (Phase 6): cart quantity is not a stock
+reservation.** Adding an item to a cart, or having it sit there, does
+not decrement `stock`, increment `reservedStock`, or otherwise reduce
+what the next customer sees as available. Every stock check — add to
+cart, update quantity, checkout review — re-reads the live
+`variant.stock`/`availableStock` at that moment and can reject the
+operation, but never reserves anything on the way there. Two customers
+can simultaneously have the last unit of a SKU in their carts; only one
+will succeed at actually acquiring it, and that moment is Phase 7's order
+creation, using proper atomic/transactional logic against live stock —
+not anything Phase 6 does. This is a deliberate boundary, not an
+oversight: real reservation (with an expiry, so an abandoned cart doesn't
+lock stock forever) is exactly the kind of stateful, race-condition-prone
+logic that belongs with the order-creation transaction that will actually
+consume the stock, not scattered across every cart mutation that merely
+*might* lead there.
 
 ### Coupon
 ```
@@ -332,3 +398,14 @@ queries `Vendor` by `user`, which already has a unique index (Phase 4).
 Nothing here needed a new index; this section is updated to say so
 explicitly, rather than the absence of a change being ambiguous between
 "reviewed, not needed" and "not reviewed."
+
+**Phase 6 review**: `Cart.user` gets its index from `unique: true` (one
+document per customer, looked up by user id on every cart operation —
+exactly the case a unique index serves). `Address.user` is indexed for
+the same "list this customer's addresses" reason Vendor/Wishlist/Cart
+all share, plus the two compound default-lookup indexes noted in the
+Address section above — checkout's "use my default shipping address"
+read is the query those exist for. No index was added on `Cart.items` or
+`Address` fields beyond `user` — nothing in this phase queries a cart or
+address by anything other than its owner and, for Address, its own `_id`
+(already indexed for free as the primary key).

@@ -1,14 +1,16 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer, { sessionCleared, bootstrapSession } from '../features/auth/authSlice';
 import wishlistReducer, { wishlistCleared } from '../features/wishlist/wishlistSlice';
+import cartReducer, { cartCleared } from '../features/cart/cartSlice';
 import { configureAuthBridge } from '../services/apiClient';
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
     wishlist: wishlistReducer,
-    // Phase 6+: cart, notifications slices mount here as they're built —
-    // each domain owns its own slice file under src/features/<domain>/.
+    cart: cartReducer,
+    // Phase 7+: notifications slice mounts here as it's built — each
+    // domain owns its own slice file under src/features/<domain>/.
   },
 });
 
@@ -33,6 +35,7 @@ configureAuthBridge({
   onRefreshFailure: () => {
     store.dispatch(sessionCleared());
     store.dispatch(wishlistCleared());
+    store.dispatch(cartCleared());
   },
 });
 

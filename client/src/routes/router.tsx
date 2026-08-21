@@ -13,6 +13,9 @@ import { CategoriesIndex } from '../pages/storefront/CategoriesIndex';
 import { CategoryBrowse } from '../pages/storefront/CategoryBrowse';
 import { Wishlist } from '../pages/customer/Wishlist';
 import { CustomerProfile } from '../pages/customer/CustomerProfile';
+import { Cart } from '../pages/customer/Cart';
+import { Checkout } from '../pages/customer/Checkout';
+import { Addresses } from '../pages/customer/Addresses';
 import { AdminOverview } from '../pages/admin/AdminOverview';
 import { AdminProducts } from '../pages/admin/AdminProducts';
 import { AdminCategories } from '../pages/admin/AdminCategories';
@@ -61,7 +64,30 @@ export const router = createBrowserRouter([
       { path: 'categories', element: <CategoriesIndex /> },
       { path: 'categories/:id', element: <CategoryBrowse /> },
       { path: 'vendors', element: <PlaceholderPage title="Vendor directory" phase="Coming soon" /> },
-      { path: 'cart', element: <PlaceholderPage title="Cart" phase="Phase 6" /> },
+      {
+        path: 'cart',
+        element: (
+          <ProtectedRoute allowedRoles={['customer']}>
+            <Cart />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'checkout',
+        element: (
+          <ProtectedRoute allowedRoles={['customer']}>
+            <Checkout />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'addresses',
+        element: (
+          <ProtectedRoute allowedRoles={['customer']}>
+            <Addresses />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: 'wishlist',
         element: (

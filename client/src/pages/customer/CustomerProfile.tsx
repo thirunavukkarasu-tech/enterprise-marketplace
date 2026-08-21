@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Mail, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Mail, ShieldCheck, ShieldAlert, MapPin, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { FormField } from '../../components/common/FormField';
@@ -122,6 +123,19 @@ export function CustomerProfile() {
           </form>
         </CardBody>
       </Card>
+
+      {user.role === 'customer' && (
+        <Link to="/addresses" className="mt-6 block">
+          <Card className="transition-shadow hover:shadow-panel-lg">
+            <CardBody className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-medium text-ink">
+                <MapPin size={16} className="text-slate" /> Manage addresses
+              </span>
+              <ChevronRight size={16} className="text-slate" />
+            </CardBody>
+          </Card>
+        </Link>
+      )}
     </div>
   );
 }
