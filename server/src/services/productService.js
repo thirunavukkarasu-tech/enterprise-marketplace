@@ -7,6 +7,8 @@ import { generateUniqueSlug } from '../utils/uniqueSlug.js';
 import { canManageProduct } from '../utils/ownership.js';
 import { ROLES } from '../constants/roles.js';
 import { PRODUCT_STATUS } from '../constants/product.js';
+import { auditService } from './auditService.js';
+import { AUDIT_ACTION } from '../constants/audit.js';
 
 function recomputePriceRange(product) {
   const prices = product.variants.map((v) => v.price);
@@ -137,6 +139,7 @@ export const productService = {
     recomputePriceRange(product);
 
     await product.save();
+    await auditService.record(user.id, AUDIT_ACTION.PRODUCT_CREATED, 'Product', product._id, { title: product.title });
     return product;
   },
 
@@ -154,6 +157,7 @@ export const productService = {
     if (payload.images !== undefined) product.images = payload.images;
 
     await product.save();
+    await auditService.record(user.id, AUDIT_ACTION.PRODUCT_UPDATED, 'Product', product._id);
     return product;
   },
 
@@ -164,8 +168,10 @@ export const productService = {
       throw ApiError.badRequest('A product needs at least one variant before it can go active');
     }
 
+    const from = product.status;
     product.status = status;
     await product.save();
+    await auditService.record(user.id, AUDIT_ACTION.PRODUCT_STATUS_CHANGED, 'Product', product._id, { from, to: status });
     return product;
   },
 

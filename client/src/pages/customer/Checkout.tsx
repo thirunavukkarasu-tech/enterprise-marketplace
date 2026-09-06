@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MapPin, Truck, ClipboardCheck, ChevronLeft, ChevronRight, AlertTriangle, Plus, CheckCircle2 } from 'lucide-react';
-import { useAppSelector } from '../../hooks/useAppStore';
+import { MapPin, Truck, ClipboardCheck, ChevronLeft, ChevronRight, AlertTriangle, Plus, CheckCircle2, PartyPopper } from 'lucide-react';
+import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
 import { addressApi } from '../../features/address/addressApi';
 import { checkoutApi } from '../../features/checkout/checkoutApi';
+import { orderApi } from '../../features/order/orderApi';
+import { fetchCart } from '../../features/cart/cartSlice';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -11,6 +13,7 @@ import { Spinner } from '../../components/common/Spinner';
 import { EmptyState } from '../../components/common/EmptyState';
 import { AddressForm } from '../../components/checkout/AddressForm';
 import type { Address, AddressInput, CheckoutSummary, ShippingMethod } from '../../types/cart';
+import type { Order } from '../../types/order';
 import { cn } from '../../utils/cn';
 
 function formatPrice(amount: number) {
@@ -55,6 +58,7 @@ function StepIndicator({ current }: { current: StepKey }) {
 
 export function Checkout() {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const { cart } = useAppSelector((s) => s.cart);
 
   const [step, setStep] = useState<StepKey>('contact');
@@ -66,6 +70,9 @@ export function Checkout() {
   const [summary, setSummary] = useState<CheckoutSummary | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [placeError, setPlaceError] = useState<string | null>(null);
+  const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
 
   const loadAddresses = () => {
     setAddressStatus('loading');
@@ -84,11 +91,14 @@ export function Checkout() {
 
   // A cart empty of any real content shouldn't be checking out at all —
   // send the customer back rather than showing a broken review step.
+  // Skipped once an order has been placed: that's exactly what emptied
+  // the cart, and the customer should see their confirmation, not get
+  // redirected away from it.
   useEffect(() => {
-    if (cart && cart.items.length === 0) {
+    if (cart && cart.items.length === 0 && !placedOrder) {
       navigate('/cart', { replace: true });
     }
-  }, [cart, navigate]);
+  }, [cart, navigate, placedOrder]);
 
   const goToReview = async () => {
     if (!selectedAddressId) return;
@@ -106,6 +116,26 @@ export function Checkout() {
     }
   };
 
+  const handlePlaceOrder = async () => {
+    if (!selectedAddressId) return;
+    setPlacing(true);
+    setPlaceError(null);
+    try {
+      // Re-validated server-side from scratch at the moment of
+      // placement — never trusts the `summary` already on screen, which
+      // could be a few minutes stale by the time the customer clicks
+      // through (see server/src/services/orderService.js).
+      const order = await orderApi.createFromCart({ shippingAddressId: selectedAddressId, shippingMethod });
+      setPlacedOrder(order);
+      dispatch(fetchCart(undefined)); // server-side cart is now empty; sync the header badge and cart page
+    } catch (err) {
+      const anyErr = err as { response?: { data?: { message?: string } } };
+      setPlaceError(anyErr.response?.data?.message ?? 'Could not place your order. Please review your cart and try again.');
+    } finally {
+      setPlacing(false);
+    }
+  };
+
   if (!cart) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -118,7 +148,8 @@ export function Checkout() {
     <div className="mx-auto max-w-2xl px-6 py-10">
       <h1 className="mb-2 text-2xl font-semibold">Checkout</h1>
       <p className="mb-6 text-sm text-slate">
-        This prepares your order for review — placing the order and paying arrive in a later phase.
+        Review your order before it's placed. Payment processing isn't wired up yet — placing an order reserves
+        stock but doesn't charge a card.
       </p>
 
       <StepIndicator current={step} />
@@ -267,7 +298,31 @@ export function Checkout() {
         </Card>
       )}
 
-      {step === 'review' && summary && (
+      {step === 'review' && placedOrder && (
+        <Card>
+          <CardBody className="flex flex-col items-center gap-3 py-10 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <PartyPopper size={22} />
+            </span>
+            <h2 className="text-lg font-semibold text-ink">Order placed</h2>
+            <p className="max-w-sm text-sm text-slate">
+              Your order <span className="font-mono font-medium text-ink">{placedOrder.orderNumber}</span> has been
+              placed. Payment processing arrives in a later phase — for now, this confirms the order and reserved
+              stock.
+            </p>
+            <div className="mt-2 flex gap-3">
+              <Link to="/orders">
+                <Button variant="secondary">View my orders</Button>
+              </Link>
+              <Link to="/products">
+                <Button>Continue shopping</Button>
+              </Link>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {step === 'review' && summary && !placedOrder && (
         <Card>
           <CardBody className="flex flex-col gap-4">
             <h2 className="flex items-center gap-2 font-medium text-ink">
@@ -328,16 +383,19 @@ export function Checkout() {
               </div>
             </div>
 
+            {placeError && <p className="rounded-md bg-coral-100 px-3 py-2 text-sm text-coral-600">{placeError}</p>}
+
             <div className="flex justify-between">
-              <Button variant="secondary" onClick={() => setStep('delivery')}>
+              <Button variant="secondary" onClick={() => setStep('delivery')} disabled={placing}>
                 <ChevronLeft size={16} /> Back
               </Button>
-              <Button disabled={!summary.canProceed} title="Order placement and payment arrive in a later phase">
-                Place order (coming soon)
+              <Button disabled={!summary.canProceed || placing} onClick={handlePlaceOrder}>
+                {placing ? 'Placing order…' : 'Place order'}
               </Button>
             </div>
             <p className="text-center text-xs text-slate">
-              This is a checkout preview only — order placement and payment aren't wired up yet.
+              Placing this order reserves stock immediately. Payment processing isn't wired up yet — this app
+              doesn't charge a card.
             </p>
           </CardBody>
         </Card>

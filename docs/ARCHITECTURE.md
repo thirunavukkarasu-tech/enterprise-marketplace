@@ -29,16 +29,17 @@ routes → controllers → services → repositories (where useful) → models
   shape the response with `ApiResponse`. A controller should be readable
   top-to-bottom in under 15 lines.
 - **services** — own business logic: order splitting across vendors,
-  inventory reservation, coupon validation, refund workflows. Services can
-  call other services (e.g. `orderService` calls `inventoryService`), but
-  controllers never skip services to reach a model directly. Where a
-  calculation needs to be identical across multiple call sites, it lives
-  in exactly one function, called by every caller — not reimplemented per
-  controller. `cartPricingService.calculateTotals` (Phase 6) is the
-  concrete example: `cartService` (cart retrieval) and `checkoutService`
-  (checkout review) both call it, and Phase 7's order creation is
-  expected to as well, rather than any of the three recomputing subtotal/
-  discount/tax/shipping logic on their own.
+  inventory adjustment, refund workflows. Services can call other
+  services (e.g. `orderService.createFromCart` calls `inventoryService.recordSale`
+  and `auditService.record`), but controllers never skip services to
+  reach a model directly. Where a calculation needs to be identical
+  across multiple call sites, it lives in exactly one function, called by
+  every caller — not reimplemented per controller.
+  `cartPricingService.calculateTotals` (Phase 6) is the concrete example:
+  `cartService` (cart retrieval), `checkoutService` (checkout review),
+  and `orderService.createFromCart` (Phase 7, the moment of actual
+  commitment) all call it, rather than any of the three recomputing
+  subtotal/discount/tax/shipping logic on their own.
 - **repositories** — introduced only where a model's queries are complex
   enough to be worth isolating (e.g. product search/filtering, order
   aggregation for analytics). Simple CRUD models are queried directly from
@@ -107,6 +108,12 @@ category browsing, by contrast, stays screen-local (`useProducts`,
 `useCategories` — plain hooks over `useState`/`useEffect`, not slices):
 a product listing's filters and results are read once per page visit and
 don't need to be visible from anywhere else in the app at the same time.
+Phase 7's order lists, inventory tables, the admin dashboard, and the
+audit log follow the same screen-local rule as products — an admin's
+order-management table and a vendor's don't need to share state with
+anything else on screen at once, so they're plain component state behind
+a shared page component (`AdminOrders`/`Inventory`, each parameterized by
+a `scope` prop rather than duplicated per role), not new Redux slices.
 Form inputs and toggles stay in component state either way — not every
 piece of state needs to be global, and not every piece of server data
 needs to be in Redux either.
@@ -114,10 +121,12 @@ needs to be in Redux either.
 ## 5. Real-time layer
 
 Socket.IO is initialized in Phase 1 (`sockets/index.js`) so the HTTP/WS
-split is decided once. No business events are wired yet — Phase 7 adds
-order-status push, Phase 8 adds delivery location/status updates. Each
-feature registers its own event handlers in that same file rather than
-spinning up a second WS server.
+split is decided once. No business events are wired yet — Phase 7 built
+order-status changes as a plain REST mutation
+(`PATCH /orders/:id/status`) with no real-time push, and Phase 8's
+delivery tracking is the first feature expected to actually register
+handlers in that file. Each feature that does should register its own
+event handlers there rather than spinning up a second WS server.
 
 ## 6. Why REST over GraphQL
 

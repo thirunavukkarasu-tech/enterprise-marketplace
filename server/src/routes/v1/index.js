@@ -9,6 +9,10 @@ import wishlistRoute from './wishlist.route.js';
 import cartRoute from './cart.route.js';
 import addressRoute from './address.route.js';
 import checkoutRoute from './checkout.route.js';
+import orderRoute from './order.route.js';
+import inventoryRoute from './inventory.route.js';
+import auditRoute from './audit.route.js';
+import adminRoute from './admin.route.js';
 
 const router = Router();
 
@@ -22,10 +26,14 @@ router.use('/wishlist', wishlistRoute);
 router.use('/cart', cartRoute);
 router.use('/addresses', addressRoute);
 router.use('/checkout', checkoutRoute);
+router.use('/orders', orderRoute);
+router.use('/inventory', inventoryRoute);
+router.use('/audit-logs', auditRoute);
+router.use('/admin', adminRoute);
 
 /**
  * Phase-by-phase route registration happens here, e.g.:
- *   router.use('/orders', orderRoute);       // Phase 7
+ *   router.use('/payments', paymentRoute);   // Phase 8+
  * Keeping this file as the single mount point means app.js never needs to
  * change as new domains are added.
  */

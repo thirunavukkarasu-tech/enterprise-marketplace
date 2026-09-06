@@ -530,9 +530,86 @@ Recalculates the cart from scratch (same pricing path as `GET /cart`) and valida
 
 ---
 
+## Orders
+
+Placing an order requires `customer`. Viewing/managing orders after that is split the same way Phase 3 split product management: `/orders` (customer's own history) vs `/orders/manage` (vendor scoped to their own vendor group within each order, admin sees everything) — one route tree, the service branches by `req.user.role`, not two parallel implementations.
+
+### `POST /orders`
+
+Requires `customer`. Same three fields as `POST /checkout/review` — re-validates the cart from scratch one more time at the moment of commitment, never trusting an earlier review response that may be stale by the time the customer clicks through.
+
+Runs inside a MongoDB transaction: every line item's stock is decremented with an atomic, conditional `findOneAndUpdate` (the update's filter itself requires enough stock to exist at that instant), the `Order` is created, an `InventoryLedger` sale entry is written, and the cart is emptied and marked `converted` — all together, or none of it. If a competing order took the last unit between review and this request, the whole transaction aborts with a clear per-item error; nothing is partially charged or decremented.
+
+**Body**: `{ "shippingAddressId": "...", "billingAddressId": "... (optional)", "shippingMethod": "standard | express (optional)" }`
+
+**201 Created** — `data.order`, with a human-readable `orderNumber` (e.g. `ORD-20260901-4F2A`), a multi-vendor `vendorGroups` array (each with its own fulfillment `status`), and `paymentStatus: "pending"` (no payment gateway exists yet — see `docs/ARCHITECTURE.md` §7).
+
+**Errors**: `400` empty cart, a blocking cart issue, or insufficient stock for any item · `404` an address id that isn't the caller's own
+
+### `GET /orders` · `GET /orders/:id`
+
+Requires `customer`. The caller's own order history/detail only — `:id` is looked up scoped to `{ _id, customer: req.user.id }`, so another customer's order id returns `404`, not `403`.
+
+### `GET /orders/manage` · `GET /orders/manage/:id`
+
+Requires `vendor` or `super_admin`. A vendor sees only orders containing at least one of their items, and only their own `vendorGroups` entry within each — another vendor's items, pricing, and fulfillment status inside the same multi-vendor order are stripped out server-side before the response is built, never just hidden in the UI. An admin sees every order and every vendor group, with optional `?status=`, `?customer=`, `?vendor=`, `?from=`, `?to=` filters (vendor requests only ever need `status`/`from`/`to`, since a vendor filtering by `customer` or `vendor` wouldn't make sense — the schema accepts the fields, the service simply never reads the admin-only ones for a vendor caller).
+
+### `PATCH /orders/:id/status`
+
+Requires `vendor` or `super_admin`.
+
+**Body**: `{ "status": "confirmed", "groupId": "... (required for admin on a multi-vendor order, auto-resolved for a vendor to their own group)" }`
+
+Rejects any transition not in the server-side whitelist with `400`, regardless of caller role — an admin cannot skip `pending` straight to `shipped` any more than a vendor can. Order lifecycle: `pending → confirmed → processing → shipped → delivered`, with `cancelled` reachable from `pending`/`confirmed`/`processing` and `refunded` only from `delivered`. `cancelled` and `refunded` are terminal.
+
+**Errors**: `400` invalid transition or missing `groupId` on a multi-vendor order · `403` a vendor targeting a group that isn't theirs
+
+---
+
+## Inventory
+
+Requires `vendor` or `super_admin`. A read/adjust layer over the existing `Product.variants[].stock` (Phase 3) — not a second source of truth for stock.
+
+### `GET /inventory`
+
+Vendor sees only their own products' variants (forced server-side); admin may pass `?vendor=` or see everything. `?stockStatus=in_stock|low_stock|out_of_stock` filters by a derived value, never stored.
+
+### `GET /inventory/:productId/history`
+
+The auditable adjustment/sale ledger for one product — who changed what, by how much, why, and when.
+
+### `PATCH /inventory/:productId/adjust`
+
+**Body**: `{ "sku": "...", "quantityChange": -3, "reason": "Damaged in warehouse" }` (signed integer; `reason` required, 3–500 characters)
+
+**Errors**: `400` the adjustment would take stock below zero, or the SKU doesn't exist on this product · `403` a vendor targeting a product they don't own
+
+---
+
+## Audit Logs
+
+### `GET /audit-logs`
+
+Requires `super_admin`. Every tracked action platform-wide (`vendor.approved`, `product.status_changed`, `inventory.adjusted`, `order.status_changed`, etc. — the full closed set is in `constants/audit.js`), optionally filtered by `?actor=`, `?action=`, `?entityType=`. Never contains passwords, tokens, or payment secrets — see `docs/SECURITY.md`.
+
+---
+
+## Admin
+
+### `GET /admin/dashboard/overview`
+
+Requires `super_admin`. Every figure is a real aggregation against live data — no hardcoded or estimated numbers. Returns platform counts (users, vendors, customers, products, active products, low-stock products, pending vendor approvals), order-group counts (pending/completed/cancelled — counted at the per-vendor-fulfillment-group level, since a single multi-vendor order can have groups in different states simultaneously), total revenue, a 14-day revenue/order trend, top-5 vendors by revenue, and the 10 most recent audit log entries.
+
+### `GET /admin/customers` · `GET /admin/customers/:id`
+
+Requires `super_admin`. A read-only view over the existing `User` collection (role `customer`) — no separate Customer model. Each row/detail includes real order count and total spend from an aggregation against `Order`, and the detail view includes the 5 most recent orders.
+
+---
+
 ## Coming in later phases
 
-Order, coupon, review, delivery, and analytics endpoints are added as
-their respective phases ship (see `docs/ROADMAP.md`). This document
-grows alongside the code that actually implements each route — it does
-not describe endpoints ahead of their implementation.
+Payment processing, coupons, reviews, delivery tracking, and advanced
+analytics are added as their respective phases ship (see
+`docs/ROADMAP.md`). This document grows alongside the code that
+actually implements each route — it does not describe endpoints ahead
+of their implementation.

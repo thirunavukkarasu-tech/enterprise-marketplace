@@ -2,7 +2,7 @@ import { Cart } from '../models/Cart.model.js';
 import { Product } from '../models/Product.model.js';
 import { ApiError } from '../utils/ApiError.js';
 import { PRODUCT_STATUS } from '../constants/product.js';
-import { MAX_CART_ITEM_QUANTITY } from '../constants/cart.js';
+import { MAX_CART_ITEM_QUANTITY, CART_STATUS } from '../constants/cart.js';
 import { hydrateCartItems, calculateTotals } from './cartPricingService.js';
 
 /**
@@ -19,6 +19,16 @@ async function getOrCreateCart(userId) {
   let cart = await Cart.findOne({ user: userId });
   if (!cart) {
     cart = await Cart.create({ user: userId, items: [] });
+  } else if (cart.status === CART_STATUS.CONVERTED) {
+    // Phase 7: this cart was converted into an order. Its items were
+    // already cleared at conversion time (see orderService.createFromCart)
+    // — flipping the status back to active here, lazily, on the next time
+    // the customer actually touches their cart, is what lets `Cart.user`
+    // stay a permanent 1:1 document per customer (its unique index)
+    // rather than needing a new document per checkout. The `converted`
+    // status is a historical marker, not a dead end.
+    cart.status = CART_STATUS.ACTIVE;
+    await cart.save();
   }
   return cart;
 }

@@ -181,36 +181,45 @@ cycle check (`categoryService.assertNoCycle`) that walks the proposed
 parent's ancestor chain — a category can never become its own, direct or
 transitive, ancestor.
 
-### Order
+### Order — **implemented in Phase 7**
 ```
 Order {
   _id
-  orderNumber      (unique, indexed, human-readable)
+  orderNumber      (unique, human-readable, e.g. "ORD-20260901-4F2A")
   customer         ref → User (indexed)
-  vendorGroups     [ {                       // one entry per vendor in a multi-vendor cart
-      vendor         ref → Vendor
-      items          [ { product ref, variantSku, title, qty, unitPrice } ]  // embedded snapshot
+  vendorGroups     [ {                       // one entry per vendor in the checkout that created this order
+      vendor         ref → User               // see the Vendor ↔ Product section above — same convention
+      items          [ { product ref, sku, title, quantity, unitPrice, lineSubtotal } ]  // embedded snapshot
       subtotal
-      status         enum: pending | confirmed | shipped | delivered | cancelled | returned
+      status         enum: pending | confirmed | processing | shipped | delivered | cancelled | refunded
   } ]
-  shippingAddress  { ... }                    // embedded snapshot at order time
-  paymentStatus    enum: pending | paid | failed | refunded
-  grandTotal
+  shippingAddress, billingAddress  { ... }    // embedded snapshots at order time
+  shippingMethod, subtotal, discountAmount, taxAmount, shippingFee, grandTotal
+  paymentStatus    enum: pending   // no gateway exists yet — see docs/ARCHITECTURE.md §7
   createdAt / updatedAt
 }
 ```
-This is the one deliberately non-obvious decision: a **single order
-document contains a `vendorGroups` array**, one entry per vendor in that
-checkout, rather than splitting into N separate Order documents per
-vendor. The customer experience ("my orders") needs the whole checkout as
-one unit; vendor-side queries ("this vendor's orders") filter into
-`vendorGroups` with an aggregation `$unwind` on `vendorGroups` matched to
-`vendor`. This avoids duplicating shared fields (customer, shipping
-address, payment) across N documents while still letting each vendor's
-portion move through its own status lifecycle independently.
-Order items are embedded as **price/title snapshots**, not live references
-— an order must show what was actually charged even if the product is
-later repriced or deleted.
+Indexed on `{ customer, createdAt }`, `{ 'vendorGroups.vendor', createdAt }`, and `{ 'vendorGroups.status' }` — the three ways this is actually queried ("my orders," "orders containing my products," "orders in status X").
+
+This is the one deliberately non-obvious decision, decided back in Phase 1 and now built exactly as planned: a **single order document contains a `vendorGroups` array**, one entry per vendor in that checkout, rather than splitting into N separate Order documents per vendor. The customer experience ("my orders") needs the whole checkout as one unit; vendor-side queries ("this vendor's orders") aggregate-`$unwind` on `vendorGroups` matched to `vendor`. This avoids duplicating shared fields (customer, shipping address, payment) across N documents while still letting each vendor's portion move through its own status lifecycle independently — one vendor group can be `shipped` while another on the same order is still `processing`.
+
+Order items are embedded as **price/title snapshots**, not live references — an order must show what was actually charged even if the product is later repriced or deleted. Unlike Cart's `priceSnapshot` (display-only, always re-priced live), an Order's `unitPrice` genuinely is what was charged, forever — nothing ever re-reads live product data for an existing order.
+
+**`vendor` references `User`, not `Vendor`** — same reasoning as `Product.vendor` (see above): introducing a second FK convention for orders alone would be inconsistent for no benefit, since `Vendor.user` already provides the reliable 1:1 relationship every vendor-scoped order query needs.
+
+**`vendorGroups[].status` uses the full operational lifecycle**
+(`pending → confirmed → processing → shipped → delivered`, with
+`cancelled`/`refunded` as terminal alternate branches) rather than the
+shorter placeholder enum (`pending | confirmed | shipped | delivered |
+cancelled | returned`) originally sketched in Phase 1 — building the real
+state machine surfaced that `processing` (payment/fulfillment prep,
+distinct from "confirmed but not yet being worked on") and `refunded`
+(distinct from a pre-shipment `cancelled`) were both operationally
+meaningful states an admin/vendor dashboard needs to filter and report
+on separately. The transition table itself
+(`ORDER_STATUS_TRANSITIONS`, `constants/order.js`) is enforced
+server-side — the same server-side-whitelist pattern Phase 4 established
+for vendor status, reused here rather than reinvented.
 
 ### Cart — **implemented in Phase 6**
 ```
@@ -305,32 +314,57 @@ repairs the stored array to match, so a deleted product doesn't
 permanently linger as an invisible entry that still counts toward the
 list.
 
-### Inventory
-Stock lives on `Product.variants[].stock` for simple reads, with a
-`reservedStock` counterpart already on the same subdocument (added in
-Phase 3, still held at `0` after Phase 6 — see the policy note below).
-A companion **`InventoryLedger`** collection (separate, append-only,
-Phase 7) will record every stock change (`reserve`, `release`, `adjust`,
-`sale`) — the audit trail a real e-commerce system needs to explain "why
-does this SKU show 4 units" is a query problem, not something that
-belongs on the product document itself.
+### Inventory — **implemented in Phase 7**
+Stock still lives on `Product.variants[].stock` (Phase 3) — inventory
+management in Phase 7 is a read/adjust *layer* over that existing data,
+not a second source of truth. `reservedStock` (added in Phase 3, held at
+`0` through Phase 6) remains unused even now: Phase 7's order creation
+decrements `stock` directly and atomically rather than reserving-then-
+confirming, since the reservation approach would need its own expiry
+handling for abandoned carts — real scope, not yet asked for. The field
+stays defined for whichever future phase actually needs a
+reserve-before-charge flow (e.g. a "pay in 3 days" order type).
 
-**Inventory reservation policy (Phase 6): cart quantity is not a stock
-reservation.** Adding an item to a cart, or having it sit there, does
-not decrement `stock`, increment `reservedStock`, or otherwise reduce
-what the next customer sees as available. Every stock check — add to
-cart, update quantity, checkout review — re-reads the live
-`variant.stock`/`availableStock` at that moment and can reject the
-operation, but never reserves anything on the way there. Two customers
-can simultaneously have the last unit of a SKU in their carts; only one
-will succeed at actually acquiring it, and that moment is Phase 7's order
-creation, using proper atomic/transactional logic against live stock —
-not anything Phase 6 does. This is a deliberate boundary, not an
-oversight: real reservation (with an expiry, so an abandoned cart doesn't
-lock stock forever) is exactly the kind of stateful, race-condition-prone
-logic that belongs with the order-creation transaction that will actually
-consume the stock, not scattered across every cart mutation that merely
-*might* lead there.
+```
+InventoryLedger {
+  _id
+  product        ref → Product
+  sku
+  vendor         ref → User
+  changeType     enum: sale | adjustment
+  quantityChange (signed: positive = added, negative = removed)
+  resultingStock
+  reason                                    // required for adjustment, absent for sale
+  performedBy    ref → User
+  createdAt
+}
+```
+Separate, referenced, append-only — same reasoning as `RefreshToken` and
+`AuditLog`: unbounded over time, queried independently of any single
+product ("this SKU's stock history"), never read/written as part of
+another document's unit of work. Indexed on `{ product, createdAt }` (a
+product's own history) and `{ vendor, createdAt }` (a vendor's activity
+across all their SKUs). Two write paths, both funneling through
+`inventoryService` rather than an ad hoc `InventoryLedger.create`
+scattered elsewhere: `adjust` (manual vendor/admin correction — a
+`reason` is required, and the resulting stock is rejected, never
+clamped, if it would go negative) and `recordSale` (written inside the
+same transaction as an order's stock decrement, so the ledger entry and
+the stock change it explains can never exist independently of each
+other).
+
+**Inventory reservation policy — resolved in Phase 7.** Phase 6
+established that cart quantity is not a stock reservation: adding an
+item to a cart never decremented `stock` or touched `reservedStock`.
+That boundary held all the way through — the first write to
+`Product.variants[].stock` in this entire app happens in
+`orderService.createFromCart` (Phase 7), inside a transaction, via an
+atomic conditional `findOneAndUpdate` (`{ 'variants.stock': { $gte:
+quantity } }` in the filter itself) rather than a read-then-write. Two
+customers can still simultaneously hold the last unit of a SKU in their
+carts — nothing prevents that, by design — but only one of their orders
+can win the race at creation time; the other gets a clear "no longer has
+enough stock" error and nothing is decremented or charged for them.
 
 ### Coupon
 ```
@@ -362,19 +396,33 @@ Compound unique index on `{ product, customer, order }` — one review per
 purchase, not per product, so a customer who buys the same item twice can
 leave two honest reviews.
 
-### AuditLog
+### AuditLog — **implemented in Phase 7**
 ```
 AuditLog {
   _id
   actor        ref → User
-  action       string   // 'vendor.approved', 'order.refunded', 'role.changed', ...
-  targetType, targetId
-  metadata     Mixed
+  action       string   // closed set — see constants/audit.js, e.g. 'vendor.approved', 'order.status_changed'
+  entityType   string   // 'Vendor' | 'Product' | 'Order'
+  entityId     ObjectId
+  metadata     Mixed    // sanitized — see docs/SECURITY.md
   createdAt
 }
 ```
-Append-only, indexed on `{ actor, createdAt }` and `{ action, createdAt }`
-for the two ways this actually gets queried (by admin, by action type).
+Append-only, indexed on `{ actor, createdAt }`, `{ action, createdAt }`,
+and `{ entityType, entityId }` — the three ways this actually gets
+queried (by admin's own actions, by action type, "history for this
+specific entity").
+
+`action` is a closed enum (`AUDIT_ACTION`, `constants/audit.js`), not a
+free-form string a caller can invent — a typo in a call site becomes an
+import error at build time, not a silently-uncategorized log entry that
+`docs/API.md`'s filter dropdown wouldn't know about. Deliberately
+lightweight: this is the "who did what, when" operational trail Phase 7
+asks for, not the full compliance/retention audit subsystem still listed
+under Phase 10 in `docs/ROADMAP.md` (export, tamper-evidence, retention
+policy) — building that now would be exactly the premature
+infrastructure this project's stated anti-over-engineering rule warns
+against.
 
 ## 3. Indexing philosophy
 
@@ -409,3 +457,18 @@ read is the query those exist for. No index was added on `Cart.items` or
 `Address` fields beyond `user` — nothing in this phase queries a cart or
 address by anything other than its owner and, for Address, its own `_id`
 (already indexed for free as the primary key).
+
+**Phase 7 review**: `Order` gets `{ customer, createdAt }` (a customer's
+own order history, always sorted newest-first), `{ 'vendorGroups.vendor',
+createdAt }` (a vendor's own order list, same sort), and
+`{ 'vendorGroups.status' }` (admin/vendor status filtering) —
+`orderNumber` already gets its index from `unique: true`. `InventoryLedger`
+gets `{ product, createdAt }` and `{ vendor, createdAt }` — a product's
+own history and a vendor's activity feed, the two actual read patterns in
+`inventoryService.history` and a hypothetical future vendor-wide
+adjustment feed. `AuditLog` gets `{ actor, createdAt }`,
+`{ action, createdAt }`, and `{ entityType, entityId }` for the same
+reason. No index exists on `vendorGroups.items` or any field inside an
+order line item — nothing queries "which orders contain product X"
+directly, and if that need arises later it's a new, deliberately-added
+index, not a speculative one sitting unused today.

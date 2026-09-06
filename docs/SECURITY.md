@@ -2,9 +2,9 @@
 
 > Status note: Phases 2 (Authentication & RBAC), 3 (Product & Category
 > Management), 4 (Vendor Management), 5 (Customer Shopping Experience),
-> and 6 (Cart & Checkout) are implemented — §1–§7 below describe what's
-> actually running, not a plan. §11 onward remain forward-looking, as
-> noted per section.
+> 6 (Cart & Checkout), and 7 (Admin & Vendor Operations) are implemented
+> — §1–§8 and §14 below describe what's actually running, not a plan.
+> §9, §12, and §15 remain forward-looking, as noted per section.
 
 ## 1. Authentication (Phase 2 — implemented)
 
@@ -269,7 +269,64 @@ intention:
   what `calculateDiscount` returns; it does not add a new place for a
   client to submit a number that becomes someone's bill.
 
-## 7. Input validation
+## 7. Order, inventory & admin operations security (Phase 7 — implemented)
+
+Order creation is the highest-stakes write path in the app so far — it
+moves real inventory and produces a permanent financial record. The
+requirements below map directly to
+`tests/integration/adminOperations.test.js`, not just stated intent:
+
+- **Order creation re-validates everything from scratch, trusting
+  nothing cached from an earlier `/checkout/review` call.** The cart is
+  re-hydrated, re-priced, and re-checked for blocking issues inside
+  `orderService.createFromCart` itself — a checkout review response
+  is a preview for the customer, never a token the server treats as
+  pre-authorized.
+- **Stock is decremented atomically and conditionally, inside a
+  transaction, closing the race Phase 6 deliberately left open.** Each
+  line item's `findOneAndUpdate` filter requires sufficient stock to
+  exist *at the moment of the write* (`{ 'variants.stock': { $gte:
+  quantity } }`) — two simultaneous orders for the last unit cannot both
+  succeed; the loser gets a clear error and the whole transaction rolls
+  back, so nothing is partially charged or decremented for them.
+- **A vendor's view into a multi-vendor order is stripped server-side,
+  not filtered in the UI.** `orderService`'s vendor-facing methods
+  return only that vendor's own `vendorGroups` entry — another vendor's
+  items, pricing, and fulfillment status inside the same order never
+  leave the server in the response body at all.
+- **Order status transitions are a server-side whitelist**
+  (`ORDER_STATUS_TRANSITIONS`, `constants/order.js`), the same pattern
+  Phase 4 established for vendor status — an admin cannot skip `pending`
+  straight to `shipped` any more than a vendor can, and a vendor can only
+  ever move their own `vendorGroups` entry, never another vendor's group
+  on a shared order (checked by looking up the group by the caller's own
+  vendor id, not trusting a client-supplied group reference to belong to
+  them).
+- **Inventory adjustment ownership reuses `canManageProduct`** (the same
+  function Phase 3 built for product ownership) rather than a second
+  inventory-specific ownership check — one function to audit for "can
+  vendor B touch vendor A's stock," consistent with every other
+  ownership boundary in this app. A resulting-stock-below-zero adjustment
+  is rejected outright, never silently clamped to zero, so a mistaken
+  adjustment surfaces as an error instead of a quietly-wrong number.
+- **Every admin-only aggregation endpoint (`/admin/dashboard/overview`,
+  `/admin/customers`, `/audit-logs`) is platform-wide by design and
+  gated with `requireRole(SUPER_ADMIN)` at the router level** — there is
+  no vendor-scoped variant of any of these, unlike `/products/manage` or
+  `/orders/manage`, because a vendor has no legitimate reason to see
+  cross-vendor customer data, platform revenue, or another vendor's
+  audit trail.
+- **Audit logging never records credentials.** `auditService.sanitize`
+  strips any metadata key matching a closed sensitive-key list
+  (`password`, `token`, `cardNumber`, etc.) before writing — a defensive
+  backstop, since every real call site already only ever passes small,
+  deliberate objects (`{ from, to }`, `{ quantity, reason }`), not a
+  reason to relax what callers are allowed to pass. A failed audit write
+  is logged as a warning and never fails the operation being audited —
+  approving a vendor must succeed even if the audit log has a transient
+  write error.
+
+## 8. Input validation
 
 - Every request body passes through a Zod schema (`validators/`) before
   reaching a controller. Validation failures return a `400` with
@@ -283,7 +340,7 @@ intention:
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 8. Transport & headers
+## 9. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -294,7 +351,7 @@ intention:
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 9. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 10. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -306,7 +363,7 @@ intention:
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 10. Error handling
+## 11. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -315,7 +372,7 @@ intention:
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 11. File uploads (not yet implemented)
+## 12. File uploads (not yet implemented)
 
 - Uploads (product images, vendor logo/banner, KYC documents) are
   validated by MIME-type allowlist and size limit before being forwarded
@@ -326,7 +383,7 @@ intention:
   handling uploads directly — no domain in the app owns file-upload
   infrastructure yet.
 
-## 12. Secrets
+## 13. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -334,20 +391,29 @@ intention:
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 13. Audit logging (Phase 10 — not yet implemented)
+## 14. Audit logging (Phase 7 — implemented; full compliance subsystem still Phase 10)
 
-A dedicated, queryable `AuditLog` collection (actor, action, target,
-timestamp) is planned for Phase 10, alongside the admin tooling that would
-actually consume it. In the meantime, Phase 2 logs the security-relevant
-auth events — registration, login, password-reset requests/completions,
-email verification, and refresh-token reuse detection — through the
-standard Winston logger (`config/logger.js`) with the acting user's id.
-That's useful for local debugging and demonstrates the events worth
-tracking, but it is **not** a substitute for the real audit trail: it's
-unstructured relative to a query-able collection and isn't retained
-independently of normal log rotation.
+A queryable `AuditLog` collection now exists (see `docs/DATABASE.md`),
+recording every action in the closed `AUDIT_ACTION` set — vendor
+approval/rejection/suspension/reactivation/verification, product
+creation/update/status changes, inventory adjustments, order creation
+and status changes — with the acting user, a sanitized metadata payload
+(§7 above), and a timestamp, queryable by an admin at `GET /audit-logs`.
 
-## 14. What's intentionally deferred
+This is the lightweight *operational* trail Phase 7 asks for, not the
+full compliance/audit subsystem `docs/ROADMAP.md` still lists under
+Phase 10: retention policy, tamper-evidence, and export are explicitly
+deferred rather than built now on the theory they might be needed —
+building them without a concrete requirement would be exactly the kind
+of premature infrastructure this project avoids elsewhere. Separately,
+Phase 2's security-relevant auth events (registration, login,
+password-reset, refresh-token reuse detection) continue to go through
+the standard Winston logger rather than `AuditLog` — those are
+operational/security logs for debugging and intrusion detection, a
+different concern from the business-action trail `AuditLog` exists for,
+and conflating the two would blur what each is actually for.
+
+## 15. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and

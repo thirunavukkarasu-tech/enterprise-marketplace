@@ -10,11 +10,15 @@
 | 4 | Vendor management | ✅ Complete |
 | 5 | Customer shopping experience | ✅ Complete |
 | 6 | Cart & checkout | ✅ Complete |
-| 7 | Orders, inventory & payments | ⏳ Next |
-| 8 | Delivery & real-time tracking | Planned |
+| 7 | Orders, inventory & admin operations | ✅ Complete* |
+| 8 | Delivery & real-time tracking | ⏳ Next |
 | 9 | Reviews, coupons & notifications | Planned |
 | 10 | Analytics, audit logs, testing & hardening | Planned |
 | 11 | Deployment, documentation & portfolio polish | Planned |
+
+\* Real payment gateway integration is intentionally still deferred —
+see the Phase 7 summary below. Orders are created and fulfilled through
+their full lifecycle; nothing charges a card yet.
 
 ## Phase 2 summary — Authentication & RBAC (complete)
 
@@ -218,18 +222,75 @@
   manipulation rejection, and address ownership — written and ready to
   run against a real MongoDB instance; see `README.md` for how
 
-## Phase 7 preview — Orders, Inventory & Payments
+## Phase 7 summary — Orders, Inventory & Admin Operations (complete)
 
-- Real order creation from a validated checkout review — using the
-  `cartPricingService.calculateTotals` function this phase already
-  built, not a fourth reimplementation of the same math
-- Atomic/transactional inventory deduction at the moment of order
+- Real order creation (`POST /orders`) from a validated checkout review —
+  reuses `cartPricingService.calculateTotals` rather than a fourth
+  reimplementation of subtotal/discount/tax/shipping math, and
+  re-validates everything from scratch at the moment of commitment
+  rather than trusting an earlier `/checkout/review` response
+- Atomic, transactional stock decrement at the moment of order
   creation — the first thing in this app to actually write to
-  `reservedStock`/`stock`, replacing Phase 6's re-check-every-time,
-  reserve-nothing policy
-- `Cart.status` transitioning from `active` to `converted` for the first
-  time — the field has existed since Phase 6, unset by anything until now
-- The payment abstraction layer described in `docs/ARCHITECTURE.md` §7
+  `Product.variants[].stock`, closing the race Phase 6 deliberately left
+  open by using a conditional `findOneAndUpdate` per line item inside a
+  MongoDB transaction; the loser of a last-unit race gets a clear error,
+  never a negative stock number
+- `Cart.status` transitions from `active` to `converted` for the first
+  time — the field existed since Phase 6, unset by anything until now
+- A full operational order lifecycle
+  (`pending → confirmed → processing → shipped → delivered`, with
+  `cancelled`/`refunded` as terminal branches) enforced by a server-side
+  transition whitelist, the same pattern Phase 4 established for vendor
+  status
+- Inventory management as a read/adjust layer over the existing
+  `Product` data (Phase 3) — no duplicate stock source of truth. Manual
+  adjustments require a reason, are rejected outright if they'd take
+  stock negative (never silently clamped to zero), and write to a new
+  append-only `InventoryLedger` alongside order-driven sale entries
+- A lightweight operational `AuditLog` — vendor approval/rejection/
+  suspension/reactivation/verification, product create/update/status
+  change, inventory adjustments, and order status changes are all
+  tracked (actor, action, entity, timestamp, sanitized metadata), wired
+  as small additive calls into the existing Phase 3/4 services rather
+  than a rewrite of either. Deliberately scoped as "who did what, when" —
+  not the fuller compliance subsystem (retention policy, tamper-evidence,
+  export) still listed under Phase 10.
+- Admin dashboard: every KPI the phase asked for, backed by a real
+  aggregation — no hardcoded or estimated numbers anywhere, including a
+  double `$match` (before and after `$unwind`) in the vendor-scoped
+  aggregations specifically to prevent one vendor's dashboard from being
+  influenced by another vendor's order data
+- Admin customer management as a read-only view over the existing `User`
+  collection (role `customer`) plus real order-count/spend aggregations —
+  no second identity/customer model
+- Frontend: a vendor/admin order management table shared via a `scope`
+  prop rather than duplicated (`/admin/orders` and `/vendor/orders` are
+  the same component), the same pattern applied to inventory
+  (`/admin/inventory` and `/vendor/inventory`); customer order history
+  and detail pages; an admin audit-log viewer; Checkout's Phase 6
+  "coming soon" placeholder replaced with a real order-placement flow
+  and confirmation screen
+- **Payment processing is still explicitly deferred** — `paymentStatus`
+  exists on every order (always `pending`) so a future payment
+  integration is a service change, not a schema migration, but nothing
+  in this app charges a card yet. See `docs/ARCHITECTURE.md` §7.
+- 28 new passing unit tests (order status transitions, inventory stock-
+  status derivation and negative-stock rule) + a comprehensive
+  integration suite covering atomic order creation, valid/invalid status
+  transitions, cross-vendor order and inventory isolation, negative-stock
+  rejection, and admin-only endpoint gating — written and ready to run
+  against a real MongoDB **replica set** (order creation uses
+  transactions, which require one); see `README.md` for how
+
+## Phase 8 preview — Delivery & Real-Time Tracking
+
+- Delivery partner assignment to a `vendorGroups` shipment, building on
+  the order lifecycle this phase just built rather than a parallel one
+- The first real business event registered on the Socket.IO server that
+  has sat initialized-but-unused since Phase 1 (`docs/ARCHITECTURE.md`
+  §5) — live shipment location/status push
+- Delivery history and tracking UI for the Delivery Partner role, whose
+  dashboard shell has existed since Phase 1
 
 ## Beyond Phase 11 — future improvements
 

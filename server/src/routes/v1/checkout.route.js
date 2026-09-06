@@ -20,9 +20,12 @@ router.use(requireAuth, requireRole(ROLES.CUSTOMER));
  * API state. Every step's data (which address, which shipping method)
  * is passed in one request here; the server has nothing to lose track of
  * between steps because it never held partial checkout state to begin
- * with. This intentionally returns a summary, never creates anything —
- * see docs/ARCHITECTURE.md for the Phase 7 order-creation boundary this
- * stops at.
+ * with. This intentionally returns a summary and creates nothing — real
+ * order creation is `POST /orders` (`orderService.createFromCart`), kept
+ * as a deliberately separate endpoint/decision from "just show me the
+ * total" so a customer can preview a checkout as many times as they like
+ * without side effects, and only committing to `POST /orders` actually
+ * decrements stock.
  */
 router.post('/review', validate(checkoutReviewSchema), asyncHandler(checkoutController.review));
 

@@ -30,7 +30,7 @@ export const vendorController = {
   },
 
   async getById(req, res) {
-    const vendor = await vendorService.getById(req.params.id);
+    const vendor = await vendorService.getDetailForAdmin(req.params.id);
     new ApiResponse(200, { vendor }).send(res);
   },
 

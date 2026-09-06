@@ -1,5 +1,5 @@
 import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom';
-import { LogOut, LayoutDashboard, Heart, UserCircle, ShoppingCart } from 'lucide-react';
+import { LogOut, LayoutDashboard, Heart, UserCircle, ShoppingCart, Package } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
 import { Button } from '../components/ui/Button';
 import { useAppDispatch, useAppSelector } from '../hooks/useAppStore';
@@ -56,6 +56,11 @@ export function StorefrontLayout() {
           <div className="flex items-center gap-3">
             {status === 'authenticated' && user ? (
               <>
+                {user.role === 'customer' && (
+                  <Link to="/orders" className="flex h-9 w-9 items-center justify-center rounded-md text-ink-soft hover:bg-slate-100" aria-label="My orders">
+                    <Package size={18} />
+                  </Link>
+                )}
                 {user.role === 'customer' && (
                   <Link to="/wishlist" className="relative flex h-9 w-9 items-center justify-center rounded-md text-ink-soft hover:bg-slate-100" aria-label="Wishlist">
                     <Heart size={18} />

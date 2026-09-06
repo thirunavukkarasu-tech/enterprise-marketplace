@@ -5,10 +5,11 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 6 of 11 complete — foundation, authentication & RBAC,
+> **Status**: Phase 7 of 11 complete — foundation, authentication & RBAC,
 > product & category management, vendor management, the customer
-> shopping experience, plus cart & checkout preparation. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
+> shopping experience, cart & checkout, plus order processing, inventory,
+> and admin operations. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
+> what's next.
 
 ## Overview
 
@@ -73,7 +74,7 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 | Vendor onboarding & approval | 4 ✅ |
 | Customer browsing, search, wishlist | 5 ✅ |
 | Cart & checkout | 6 ✅ |
-| Multi-vendor order splitting, inventory, payment abstraction | 7 |
+| Multi-vendor order splitting, inventory, admin operations | 7 ✅ |
 | Real-time delivery tracking (Socket.IO) | 8 |
 | Reviews, coupons, notifications | 9 |
 | Analytics, audit logs, hardening | 10 |
@@ -154,28 +155,33 @@ This runs the full unit test suite (JWT signing/verification, token
 hashing, duration parsing, Zod validators, RBAC middleware, slugify/
 unique-slug generation, product ownership rules, product/category/vendor
 validators, vendor status transitions, the Phase 5 customer-experience
-validators for `inStock`/`withCounts`/wishlist/profile, and the Phase 6
-cart pricing calculation + cart/checkout/address validators — 108 tests,
-no database required) plus the health-check integration tests (2 tests).
-Six further integration suites need a real MongoDB connection and are
-skipped by default in environments without one (shown as 6 skip-notice
-tests in the count, 116 total): the full auth flow (register → login →
-refresh-rotation → logout, reuse detection, generic error messages,
-deactivated-user rejection), category management (cycle prevention,
-deletion guards, active-only public listing), product management
-(cross-vendor ownership enforcement, SKU uniqueness, status transitions,
-public visibility rules), vendor management (onboarding, cross-vendor
-IDOR checks, self-approval/self-verification prevention, mass-assignment
-rejection, the full approve/reject/suspend/reactivate lifecycle, and a
-regression check that product ownership still works with vendor
-management layered on top), the customer experience (wishlist auth/RBAC/
-duplicate-prevention/cross-customer isolation, profile mass-assignment
-rejection, `inStock` filtering, `vendorStore` enrichment, category
-product counts), and cart & checkout (cross-customer cart isolation,
-vendor/admin blocked from cart access, client-supplied price/subtotal/
-total silently ignored, price-change detection charging the new price,
-stock validation on every mutation, address ownership, checkout
-validation for empty carts and mismatched addresses):
+validators for `inStock`/`withCounts`/wishlist/profile, the Phase 6 cart
+pricing calculation + cart/checkout/address validators, and the Phase 7
+order-status transition table + inventory stock-status derivation — 136
+tests, no database required) plus the health-check integration tests (2
+tests). Seven further integration suites need a real MongoDB connection
+and are skipped by default in environments without one (shown as 7
+skip-notice tests in the count, 145 total): the full auth flow (register
+→ login → refresh-rotation → logout, reuse detection, generic error
+messages, deactivated-user rejection), category management (cycle
+prevention, deletion guards, active-only public listing), product
+management (cross-vendor ownership enforcement, SKU uniqueness, status
+transitions, public visibility rules), vendor management (onboarding,
+cross-vendor IDOR checks, self-approval/self-verification prevention,
+mass-assignment rejection, the full approve/reject/suspend/reactivate
+lifecycle, and a regression check that product ownership still works
+with vendor management layered on top), the customer experience
+(wishlist auth/RBAC/duplicate-prevention/cross-customer isolation,
+profile mass-assignment rejection, `inStock` filtering, `vendorStore`
+enrichment, category product counts), cart & checkout (cross-customer
+cart isolation, vendor/admin blocked from cart access, client-supplied
+price/subtotal/total silently ignored, price-change detection charging
+the new price, stock validation on every mutation, address ownership,
+checkout validation for empty carts and mismatched addresses), and
+admin/vendor operations (atomic transactional order creation, valid/
+invalid order status transitions, cross-vendor order and inventory
+isolation, negative-stock rejection, admin-only endpoint gating, and
+audit log creation):
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
@@ -184,9 +190,15 @@ TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/i
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/vendors.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/customerExperience.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/cartCheckout.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/adminOperations.test.js
 ```
 
 Each suite creates its own isolated database and drops it when finished.
+**`adminOperations.test.js` needs a replica set, not just a standalone
+`mongod`** — order creation uses a MongoDB transaction, and transactions
+require one. A single-node replica set works fine for local testing
+(`mongod --replSet rs0`, then `rs.initiate()` once via `mongosh`); the
+other six suites don't need this.
 
 ## Environment variables
 
@@ -211,9 +223,13 @@ and vendor-store enrichment, and the vendor/admin managed endpoints with
 ownership enforcement), vendor management (self-service onboarding/
 profile/dashboard, and admin approve/reject/suspend/reactivate/verify),
 the customer shopping experience (self-service profile updates,
-wishlist), and cart & checkout (server-authoritative pricing, address
-management, checkout review) is in [`docs/API.md`](docs/API.md). Order
-and other domain endpoints are added there as their phases ship.
+wishlist), cart & checkout (server-authoritative pricing, address
+management, checkout review), and orders/inventory/admin operations
+(atomic transactional order creation, order lifecycle management,
+inventory adjustment with an auditable ledger, an operational audit log,
+and admin dashboard/customer-management aggregations) is in
+[`docs/API.md`](docs/API.md). Payment processing and other domain
+endpoints are added there as their phases ship.
 
 ## Health check
 

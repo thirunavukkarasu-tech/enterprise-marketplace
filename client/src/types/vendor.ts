@@ -81,12 +81,43 @@ export interface VendorDashboardProduct {
   createdAt: string;
 }
 
+export interface VendorOrderStats {
+  total: number;
+  pending: number;
+  completed: number;
+}
+
+export interface VendorRecentOrder {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  subtotal: number;
+  itemCount: number;
+  createdAt: string;
+}
+
+export interface VendorInventoryAlerts {
+  lowStock: number;
+  outOfStock: number;
+}
+
+export interface VendorTrendPoint {
+  date: string;
+  revenue: number;
+  orders: number;
+}
+
 export interface VendorDashboard {
   vendor: Vendor;
   productCounts: VendorProductCounts;
   profileCompletion: number;
   recentProducts: VendorDashboardProduct[];
   notices: VendorDashboardNotice[];
+  orderStats: VendorOrderStats;
+  revenue: number;
+  recentOrders: VendorRecentOrder[];
+  salesTrend: VendorTrendPoint[];
+  inventoryAlerts: VendorInventoryAlerts;
 }
 
 export interface VendorListQuery {
