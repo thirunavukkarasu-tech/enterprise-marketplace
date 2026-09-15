@@ -65,14 +65,15 @@ const orderSchema = new mongoose.Schema(
     billingAddress: { type: addressSnapshotSchema, required: true },
     shippingMethod: { type: String, required: true },
     subtotal: { type: Number, required: true, min: 0 },
+    couponCode: { type: String, default: null },
     discountAmount: { type: Number, required: true, default: 0, min: 0 },
     taxAmount: { type: Number, required: true, default: 0, min: 0 },
     shippingFee: { type: Number, required: true, default: 0, min: 0 },
     grandTotal: { type: Number, required: true, min: 0 },
-    // No payment gateway exists yet (docs/ARCHITECTURE.md §7) — every
-    // order is created `pending` and nothing in this app transitions it.
-    // The field exists now so a later phase's payment integration is a
-    // service change, not a schema migration.
+    // Transitioned by paymentService (Phase 8) as a Payment attached to
+    // this order moves through its own lifecycle — see Payment.model.js
+    // for why payment attempts are a separate collection rather than an
+    // embedded field here (an order can have more than one attempt).
     paymentStatus: { type: String, enum: Object.values(PAYMENT_STATUS), default: PAYMENT_STATUS.PENDING },
   },
   { timestamps: true }

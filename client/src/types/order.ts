@@ -1,5 +1,11 @@
 export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
 
+/** Mirrors the backend's PAYMENT_STATUS enum (constants/order.js) — kept
+ * separate from OrderStatus, since a payment's lifecycle and an order's
+ * fulfillment lifecycle are two different state machines that happen to
+ * both live on the Order document (see docs/DATABASE.md). */
+export type PaymentStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'cancelled' | 'refunded';
+
 export interface OrderItem {
   product: string;
   sku: string;
@@ -49,7 +55,7 @@ export interface Order {
   taxAmount: number;
   shippingFee: number;
   grandTotal: number;
-  paymentStatus: 'pending';
+  paymentStatus: PaymentStatus;
   createdAt: string;
   updatedAt: string;
 }

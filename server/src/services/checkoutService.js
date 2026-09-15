@@ -2,6 +2,7 @@ import { Cart } from '../models/Cart.model.js';
 import { ApiError } from '../utils/ApiError.js';
 import { hydrateCartItems, calculateTotals } from './cartPricingService.js';
 import { addressService } from './addressService.js';
+import { couponService } from './couponService.js';
 
 /**
  * This is the "checkout boundary" Phase 7 is expected to build on: a
@@ -20,7 +21,17 @@ export const checkoutService = {
       throw ApiError.badRequest('Your cart is empty.');
     }
 
-    const totals = calculateTotals(items, { shippingMethod });
+    // Same graceful resolution GET /cart uses — a review is a read, not
+    // a commit, so a coupon that's gone stale since it was applied is
+    // surfaced as `couponError` and cleared, not a hard failure of the
+    // whole review.
+    const { coupon, couponError, changed } = await couponService.resolveForCart(cart.couponCode, userId, items);
+    if (changed) {
+      cart.couponCode = null;
+      await cart.save();
+    }
+
+    const totals = calculateTotals(items, { shippingMethod, coupon });
 
     // Ownership-checked the same way every other address operation is —
     // a customer cannot check out against an address id that isn't
@@ -34,6 +45,7 @@ export const checkoutService = {
 
     return {
       ...totals,
+      couponError,
       shippingAddress,
       billingAddress,
       canProceed,

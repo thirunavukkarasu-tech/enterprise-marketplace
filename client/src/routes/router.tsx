@@ -1,5 +1,5 @@
 import { createBrowserRouter } from 'react-router-dom';
-import { LayoutDashboard, Store, Boxes, ShoppingCart, Users, Settings, FolderTree, History, PackageSearch } from 'lucide-react';
+import { LayoutDashboard, Store, Boxes, ShoppingCart, Users, Settings, FolderTree, History, PackageSearch, Tag } from 'lucide-react';
 
 import { StorefrontLayout } from '../layouts/StorefrontLayout';
 import { DashboardLayout } from '../layouts/DashboardLayout';
@@ -23,6 +23,7 @@ import { AdminProducts } from '../pages/admin/AdminProducts';
 import { AdminCategories } from '../pages/admin/AdminCategories';
 import { AdminVendors } from '../pages/admin/AdminVendors';
 import { AdminOrders } from '../pages/admin/AdminOrders';
+import { AdminCoupons } from '../pages/admin/AdminCoupons';
 import { AdminCustomers } from '../pages/admin/AdminCustomers';
 import { AdminAuditLog } from '../pages/admin/AdminAuditLog';
 import { VendorOverview } from '../pages/vendor/VendorOverview';
@@ -49,6 +50,7 @@ const adminNav = [
   { to: '/admin/categories', label: 'Categories', icon: FolderTree },
   { to: '/admin/inventory', label: 'Inventory', icon: PackageSearch },
   { to: '/admin/orders', label: 'Orders', icon: ShoppingCart },
+  { to: '/admin/coupons', label: 'Coupons', icon: Tag },
   { to: '/admin/customers', label: 'Customers', icon: Users },
   { to: '/admin/audit-log', label: 'Audit Log', icon: History },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
@@ -157,6 +159,7 @@ export const router = createBrowserRouter([
       { path: 'categories', element: <AdminCategories /> },
       { path: 'inventory', element: <Inventory scope="admin" /> },
       { path: 'orders', element: <AdminOrders /> },
+      { path: 'coupons', element: <AdminCoupons /> },
       { path: 'customers', element: <AdminCustomers /> },
       { path: 'audit-log', element: <AdminAuditLog /> },
       { path: 'settings', element: <PlaceholderPage title="System settings" phase="Phase 10" /> },

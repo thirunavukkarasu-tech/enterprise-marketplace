@@ -366,19 +366,103 @@ carts — nothing prevents that, by design — but only one of their orders
 can win the race at creation time; the other gets a clear "no longer has
 enough stock" error and nothing is decremented or charged for them.
 
-### Coupon
+### Coupon — **implemented in Phase 8**
 ```
 Coupon {
   _id
-  code            (unique, indexed)
-  vendor          ref → Vendor | null   // null = platform-wide coupon
-  discountType    enum: percentage | fixed
+  code              (unique, indexed, normalized to uppercase)
+  description
+  discountType      enum: percentage | fixed
   discountValue
-  minOrderAmount
-  usageLimit, usageCount
-  expiresAt
+  maxDiscountAmount           // caps a percentage discount's absolute value
+  minOrderValue
+  startsAt, expiresAt         // both optional/nullable
+  usageLimit, usageCount      // global cap and running count
+  perUserLimit                // optional per-customer cap
+  isActive          boolean (indexed)
+  createdBy         ref → User
 }
 ```
+The original Phase 1 speculative design had a `vendor: Vendor | null`
+field for per-vendor coupons. The actual Phase 8 build is
+**platform-wide only** — every coupon is created and owned by an admin,
+none are vendor-specific. Adding vendor-scoped coupons later is additive
+(a nullable `vendor` ref, same as the original sketch), not a breaking
+change to what exists now.
+
+`usageCount` is incremented exactly once, inside the same transaction as
+order creation — never on "apply to cart," since a preview that never
+becomes an order must not consume the limit. This field alone only
+answers the *global* usage question; see `CouponUsage` below for the
+*per-user* one.
+
+### CouponUsage — **implemented in Phase 8**
+```
+CouponUsage {
+  _id
+  coupon   ref → Coupon (indexed with user)
+  user     ref → User
+  order    ref → Order
+  discountAmount
+  createdAt
+}
+```
+A separate collection rather than a counter field, because it exists
+specifically to answer "how many times has *this user* used *this
+coupon*" — one document per successful order placed with a coupon,
+written inside the same transaction as order creation. Not unique on
+`{coupon, user}`: a coupon with `perUserLimit > 1` is legitimately usable
+more than once by the same customer, across different orders.
+
+### Payment — **implemented in Phase 8**
+```
+Payment {
+  _id
+  order        ref → Order (indexed, not unique)
+  customer     ref → User
+  amount
+  method       enum: card | upi
+  provider     enum: mock                 // the only value that exists
+  status       enum: pending | processing | paid | failed | cancelled | refunded
+  transactionId (unique, indexed)
+  failureReason
+  providerMetadata      Mixed             // safe, non-sensitive only — see docs/SECURITY.md §8
+  processingAt, paidAt, failedAt, cancelledAt, refundedAt
+}
+```
+Never embedded on `Order`, unlike `orderItemSchema` — an order can have
+more than one payment attempt over its lifetime (a failed attempt
+followed by a successful retry), and each attempt is a complete,
+independent record with its own status history. `order` is indexed but
+deliberately *not* unique, for exactly this reason.
+
+**Never stores a card number, CVV, or any other raw payment credential.**
+`providerMetadata` is for safe references only (e.g. a masked card
+suffix or a mock response code) — see `docs/SECURITY.md` §8 for what
+storing anything more would mean for PCI scope.
+
+### PaymentWebhookEvent — **implemented in Phase 8**
+```
+PaymentWebhookEvent {
+  _id
+  eventId    (unique, indexed) — the provider's own event id
+  provider
+  type
+  payment    ref → Payment (optional — null if the event didn't map to a known payment)
+  payload    Mixed
+  createdAt
+}
+```
+The entire idempotency strategy for the payment webhook lives in the
+unique index on `eventId`, not in application-level "have I seen this
+before" logic: the handler tries to *insert* a document with the
+provider's event id before doing anything else. If that insert hits the
+unique index and fails, the event has already been processed and the
+handler returns success immediately without touching `Payment`/`Order`
+again. This is safe under concurrent duplicate deliveries — a
+"check-then-act" read-then-write pattern is not, since two simultaneous
+deliveries of the same event could both pass a `findOne` check before
+either has written anything.
 
 ### Review
 ```

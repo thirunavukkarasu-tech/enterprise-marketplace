@@ -604,12 +604,69 @@ Requires `super_admin`. Every figure is a real aggregation against live data —
 
 Requires `super_admin`. A read-only view over the existing `User` collection (role `customer`) — no separate Customer model. Each row/detail includes real order count and total spend from an aggregation against `Order`, and the detail view includes the 5 most recent orders.
 
+### `GET /admin/coupons` · `POST /admin/coupons` · `GET /admin/coupons/:id` · `PATCH /admin/coupons/:id` · `PATCH /admin/coupons/:id/status` · `DELETE /admin/coupons/:id`
+
+Requires `super_admin`. Standard CRUD plus a dedicated status toggle (`PATCH .../status`, body `{ "isActive": true|false }` — kept separate from the general update so deactivating a coupon can't be bundled with an unrelated field change by accident).
+
+**Body** (create/update): `code` (3–30 chars, normalized to uppercase server-side regardless of what's sent), `description` (optional), `discountType` (`percentage`|`fixed`), `discountValue` (positive; capped at 100 when `discountType` is `percentage`), `maxDiscountAmount` (optional, caps a percentage discount's absolute value), `minOrderValue` (optional, default 0), `startsAt`/`expiresAt` (optional dates; `startsAt` must be before `expiresAt` if both are set), `usageLimit` (optional global cap), `perUserLimit` (optional per-customer cap).
+
+**Errors**: `400` validation failure (including percentage > 100, or `startsAt` after `expiresAt`) · `404` coupon not found · `409` duplicate code
+
+---
+
+## Applying a coupon (customer)
+
+### `POST /cart/coupon` · `DELETE /cart/coupon`
+
+Requires the `customer` role. Coupon state lives on the `Cart` document (`Cart.couponCode`), not under `/checkout` — a coupon is something a customer tries out while shopping, and `GET /cart` needs to reflect it the same way it reflects everything else about the cart. `POST` body: `{ "code": "...", "shippingMethod": "standard|express (optional)" }`.
+
+Applying runs the full eligibility check (exists, active, started, not expired, minimum order value, global usage limit, per-user usage limit) as a hard failure — a customer actively typing in a code gets an immediate, specific error (`docs/SECURITY.md` §8 lists each one), not a silently-ignored one. Every subsequent `GET /cart` and `POST /checkout/review` re-checks the same eligibility non-fatally instead: if the coupon has since become invalid, the response clears it and sets `couponError` rather than breaking the page.
+
+**Response** (both cart and checkout responses): `discountAmount`, `couponCode`, alongside the existing `subtotal`/`taxAmount`/`shippingFee`/`grandTotal` — every one of these is a server calculation; no field in any cart/checkout/coupon request body can set a discount or total directly.
+
+---
+
+## Payments
+
+Requires the `customer` role for every route except the webhook. Every route besides the webhook is ownership-scoped to `req.user.id` — there is no way to fetch or act on another customer's payment.
+
+**There is no real payment gateway integrated.** `mockPaymentProvider.js` is the entire "provider" this app talks to — it exists so the full create → verify → webhook → order-consistency flow can be built and tested end-to-end, but no money moves and no real provider is called. See `docs/ARCHITECTURE.md` §7 and `docs/SECURITY.md` §8 for what a real integration would need to change.
+
+### `POST /payments`
+
+**Body**: `{ "orderId": "...", "method": "card" | "upi" }`
+
+Starts a payment attempt for an order the caller owns. An order can have more than one attempt over its lifetime — a failed attempt doesn't block retrying. Returns the new `Payment` at `status: "processing"`.
+
+**Errors**: `400` order not found or already fully paid · `403` non-customer role
+
+### `POST /payments/:id/verify`
+
+**Body**: `{ "simulate": "success" | "failure" (optional, default "success") }` — **only honored when `payment.provider === "mock"`**, which is always true today. A real provider integration would drop this field entirely; the route itself wouldn't change.
+
+Applies the outcome to both `Payment` and `Order` inside one transaction — a reader can never observe the two documents disagreeing about whether the order is paid. On success, every `vendorGroups` entry still `pending` moves to `confirmed`. On failure, the order is left exactly as it was — a failed payment does not cancel the order, it leaves it awaiting a retried payment.
+
+**Errors**: `400` invalid payment status transition (e.g. verifying an already-`paid` payment) or the payment isn't using the mock provider
+
+### `GET /payments/:id`
+
+Returns the caller's own payment record.
+
+### `POST /payments/webhook`
+
+**No authentication** — a payment provider's server calls this, not a logged-in customer, and can't attach a bearer token. Real authenticity verification (a provider-specific signature header) is the extension point a real integration would add here; with only the mock provider configured, there is nothing to sign or verify, so no check is faked in its place.
+
+**Idempotent by construction**: the handler tries to *insert* the event's id into a dedicated collection before doing anything else; a duplicate delivery hits a unique-index conflict and is discarded, always returning `200`. This is safe under concurrent duplicate deliveries in a way a "check if seen, then act" pattern is not.
+
+**Body**: `{ "eventId": "...", "provider": "mock", "type": "payment.succeeded" | "payment.failed" | "payment.cancelled", "payload": { "transactionId": "...", "failureReason": "... (optional)" } }`
+
+Always returns `200` — including for an unrecognized `transactionId` or event `type`, since a webhook endpoint retrying on a non-2xx is standard provider behavior, and there's nothing actionable to retry for an event that will never resolve to a known payment.
+
 ---
 
 ## Coming in later phases
 
-Payment processing, coupons, reviews, delivery tracking, and advanced
-analytics are added as their respective phases ship (see
-`docs/ROADMAP.md`). This document grows alongside the code that
-actually implements each route — it does not describe endpoints ahead
-of their implementation.
+Reviews, delivery tracking, and advanced analytics are added as their
+respective phases ship (see `docs/ROADMAP.md`). This document grows
+alongside the code that actually implements each route — it does not
+describe endpoints ahead of their implementation.

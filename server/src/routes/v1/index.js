@@ -13,6 +13,7 @@ import orderRoute from './order.route.js';
 import inventoryRoute from './inventory.route.js';
 import auditRoute from './audit.route.js';
 import adminRoute from './admin.route.js';
+import paymentRoute from './payment.route.js';
 
 const router = Router();
 
@@ -30,12 +31,12 @@ router.use('/orders', orderRoute);
 router.use('/inventory', inventoryRoute);
 router.use('/audit-logs', auditRoute);
 router.use('/admin', adminRoute);
+router.use('/payments', paymentRoute);
 
 /**
- * Phase-by-phase route registration happens here, e.g.:
- *   router.use('/payments', paymentRoute);   // Phase 8+
- * Keeping this file as the single mount point means app.js never needs to
- * change as new domains are added.
+ * Phase-by-phase route registration happens here. Keeping this file as
+ * the single mount point means app.js never needs to change as new
+ * domains are added.
  */
 
 export default router;

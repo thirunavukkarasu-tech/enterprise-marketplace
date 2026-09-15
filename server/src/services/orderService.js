@@ -12,6 +12,7 @@ import { addressService } from './addressService.js';
 import { generateOrderNumber } from '../utils/orderNumber.js';
 import { auditService } from './auditService.js';
 import { inventoryService } from './inventoryService.js';
+import { couponService } from './couponService.js';
 import { PAGINATION_DEFAULTS } from '../constants/product.js';
 
 /**
@@ -95,6 +96,15 @@ export const orderService = {
       throw ApiError.badRequest('Some items in your cart are no longer available. Please review your cart.');
     }
 
+    // Strict, not the graceful resolution GET /cart and checkout review
+    // use — placing an order is a commit action. If the coupon shown
+    // during review has since gone stale (expired, hit its limit) in
+    // the moments between review and this request, the order must fail
+    // with a clear error rather than silently drop the discount and
+    // charge the customer more than the total they last saw.
+    const coupon = cart.couponCode ? await couponService.validateForCart(cart.couponCode, userId, hydratedItems) : null;
+    const totalsWithCoupon = calculateTotals(hydratedItems, { shippingMethod, coupon });
+
     const shippingAddress = await addressService.assertOwned(userId, shippingAddressId);
     const billingAddress = billingAddressId
       ? await addressService.assertOwned(userId, billingAddressId)
@@ -147,12 +157,13 @@ export const orderService = {
               vendorGroups,
               shippingAddress: toAddressSnapshot(shippingAddress),
               billingAddress: toAddressSnapshot(billingAddress),
-              shippingMethod: totals.shippingMethod,
-              subtotal: totals.subtotal,
-              discountAmount: totals.discountAmount,
-              taxAmount: totals.taxAmount,
-              shippingFee: totals.shippingFee,
-              grandTotal: totals.grandTotal,
+              shippingMethod: totalsWithCoupon.shippingMethod,
+              subtotal: totalsWithCoupon.subtotal,
+              couponCode: totalsWithCoupon.couponCode,
+              discountAmount: totalsWithCoupon.discountAmount,
+              taxAmount: totalsWithCoupon.taxAmount,
+              shippingFee: totalsWithCoupon.shippingFee,
+              grandTotal: totalsWithCoupon.grandTotal,
             },
           ],
           { session }
@@ -161,10 +172,21 @@ export const orderService = {
 
         await inventoryService.recordSale(saleEntries, session);
 
+        if (coupon) {
+          await couponService.recordUsage({
+            coupon,
+            userId,
+            orderId: order._id,
+            discountAmount: totalsWithCoupon.discountAmount,
+            session,
+          });
+        }
+
         // Converted, not deleted — Cart.user is a permanent 1:1 document
         // per customer (see cartService.js); the next cart interaction
         // lazily flips this back to active.
         cart.items = [];
+        cart.couponCode = null;
         cart.status = CART_STATUS.CONVERTED;
         await cart.save({ session });
       });

@@ -16,4 +16,11 @@ export const AUDIT_ACTION = Object.freeze({
   INVENTORY_ADJUSTED: 'inventory.adjusted',
   ORDER_CREATED: 'order.created',
   ORDER_STATUS_CHANGED: 'order.status_changed',
+  PAYMENT_CREATED: 'payment.created',
+  PAYMENT_SUCCEEDED: 'payment.succeeded',
+  PAYMENT_FAILED: 'payment.failed',
+  COUPON_CREATED: 'coupon.created',
+  COUPON_UPDATED: 'coupon.updated',
+  COUPON_STATUS_CHANGED: 'coupon.status_changed',
+  COUPON_DELETED: 'coupon.deleted',
 });

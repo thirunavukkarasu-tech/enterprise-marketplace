@@ -6,6 +6,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import { ROLES } from '../../constants/roles.js';
 import { addCartItemSchema, updateCartItemSchema, cartItemParamSchema, getCartQuerySchema } from '../../validators/cart.validator.js';
+import { applyCouponSchema } from '../../validators/coupon.validator.js';
 
 const router = Router();
 
@@ -21,5 +22,14 @@ router.post('/items', validate(addCartItemSchema), asyncHandler(cartController.a
 router.patch('/items/:itemId', validate(updateCartItemSchema), asyncHandler(cartController.updateItem));
 router.delete('/items/:itemId', validate(cartItemParamSchema), asyncHandler(cartController.removeItem));
 router.delete('/', asyncHandler(cartController.clear));
+
+// Coupon state lives on the Cart document (Cart.couponCode) — see
+// cartService.js — so these live under /cart rather than /checkout,
+// even though an earlier planning note considered /checkout/apply-coupon.
+// Reuses coupon.validator's applyCouponSchema (it also accepts an
+// optional shippingMethod field meant for a different caller; harmless
+// and unused here, not worth a second near-identical schema).
+router.post('/coupon', validate(applyCouponSchema), asyncHandler(cartController.applyCoupon));
+router.delete('/coupon', asyncHandler(cartController.removeCoupon));
 
 export default router;

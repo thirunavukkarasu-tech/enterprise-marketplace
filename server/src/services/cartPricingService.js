@@ -2,6 +2,7 @@ import { Product } from '../models/Product.model.js';
 import { PRODUCT_STATUS } from '../constants/product.js';
 import { CART_ITEM_ISSUE } from '../constants/cart.js';
 import { getShippingFee, SHIPPING_METHOD } from '../constants/shipping.js';
+import { DISCOUNT_TYPE } from '../constants/coupon.js';
 
 /**
  * The one place cart/checkout totals are computed. `cartService` (cart
@@ -100,18 +101,43 @@ const BLOCKING_ISSUES = new Set([
 ]);
 
 /**
- * Discount and tax are deliberate extension points, not implemented
- * calculations:
- *   - Discounts belong to Phase 9 (coupons/promotions). Returning a flat
- *     zero here — rather than omitting the field — keeps the response
- *     shape stable for the frontend across the phase boundary; when
- *     Phase 9 lands, only this function's body changes.
- *   - Tax is jurisdiction-specific and legally sensitive; this app has
- *     no defined tax requirement, so it stays at zero rather than
- *     guessing at a rate. See docs/SECURITY.md and docs/ARCHITECTURE.md.
+ * Tax is jurisdiction-specific and legally sensitive; this app has no
+ * defined tax requirement, so it stays at zero rather than guessing at a
+ * rate. See docs/SECURITY.md and docs/ARCHITECTURE.md.
+ *
+ * Discount, unlike tax, is no longer a stub — Phase 8 wired it to
+ * `couponService`. This function stays a pure calculation with no
+ * database access of its own: by the time a `coupon` document reaches
+ * here, `couponService.validateForCart` has already confirmed it's
+ * active, within its date window, under its usage limits, and that the
+ * cart meets its minimum order value. This function only computes the
+ * amount, never re-validates eligibility — that split keeps this
+ * function synchronous and trivially unit-testable.
  */
-function calculateDiscount(_hydratedItems) {
-  return 0;
+function calculateDiscount(hydratedItems, coupon) {
+  if (!coupon) return 0;
+
+  // Discount is computed against the value of items actually
+  // contributing to the order — a blocked (out-of-stock/unavailable)
+  // line item's price was never counted into the subtotal in the first
+  // place, so it can't be discounted either.
+  const eligibleSubtotal = hydratedItems.reduce((sum, item) => sum + item.lineSubtotal, 0);
+
+  let amount =
+    coupon.discountType === DISCOUNT_TYPE.PERCENTAGE
+      ? eligibleSubtotal * (coupon.discountValue / 100)
+      : coupon.discountValue;
+
+  if (coupon.maxDiscountAmount != null) {
+    amount = Math.min(amount, coupon.maxDiscountAmount);
+  }
+
+  // A discount can never exceed the subtotal it's discounting — the
+  // grand total floor is enforced here, at the source, rather than
+  // trusting every caller to clamp it afterward.
+  amount = Math.min(amount, eligibleSubtotal);
+
+  return Number(Math.max(amount, 0).toFixed(2));
 }
 
 function calculateTax(_subtotal) {
@@ -123,21 +149,26 @@ function calculateTax(_subtotal) {
  * "cart items → validation → current prices → subtotals → discount →
  * tax → shipping → grand total." Called with already-hydrated items so
  * it stays pure and easy to unit test without touching the database.
+ * `coupon`, when provided, must already be validated (see the note on
+ * calculateDiscount above) — this function trusts it completely, the
+ * same way it trusts `hydratedItems` were freshly re-read from the
+ * database rather than reused from an earlier response.
  */
-export function calculateTotals(hydratedItems, { shippingMethod = SHIPPING_METHOD.STANDARD } = {}) {
+export function calculateTotals(hydratedItems, { shippingMethod = SHIPPING_METHOD.STANDARD, coupon = null } = {}) {
   const hasBlockingIssues = hydratedItems.some((item) => BLOCKING_ISSUES.has(item.issue));
   const hasPriceChanges = hydratedItems.some((item) => item.issue === CART_ITEM_ISSUE.PRICE_CHANGED);
 
   const subtotal = Number(hydratedItems.reduce((sum, item) => sum + item.lineSubtotal, 0).toFixed(2));
-  const discountAmount = calculateDiscount(hydratedItems);
+  const discountAmount = calculateDiscount(hydratedItems, coupon);
   const taxAmount = calculateTax(subtotal - discountAmount);
   const shippingFee = hydratedItems.length > 0 ? getShippingFee(shippingMethod) : 0;
-  const grandTotal = Number((subtotal - discountAmount + taxAmount + shippingFee).toFixed(2));
+  const grandTotal = Number(Math.max(subtotal - discountAmount + taxAmount + shippingFee, 0).toFixed(2));
 
   return {
     items: hydratedItems,
     itemCount: hydratedItems.reduce((sum, item) => sum + item.quantity, 0),
     subtotal,
+    couponCode: coupon?.code ?? null,
     discountAmount,
     taxAmount,
     shippingMethod,

@@ -4,6 +4,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { PRODUCT_STATUS } from '../constants/product.js';
 import { MAX_CART_ITEM_QUANTITY, CART_STATUS } from '../constants/cart.js';
 import { hydrateCartItems, calculateTotals } from './cartPricingService.js';
+import { couponService } from './couponService.js';
 
 /**
  * Every function here takes `userId` from the caller (the controller,
@@ -49,11 +50,26 @@ async function loadValidatedProductVariant(productId, skuRaw) {
   return { product, variant, sku };
 }
 
-function respond(cart, { shippingMethod } = {}) {
-  return hydrateCartItems(cart.items).then((items) => ({
+async function respond(cart, { shippingMethod } = {}) {
+  const items = await hydrateCartItems(cart.items);
+
+  // Graceful resolution: a stored coupon that's since become invalid
+  // (expired, hit its limit, cart no longer meets the minimum) doesn't
+  // block viewing the cart — it's cleared and surfaced as `couponError`
+  // instead. See couponService.resolveForCart for why this is the
+  // read-only counterpart to the strict check applyCoupon/order creation
+  // use.
+  const { coupon, couponError, changed } = await couponService.resolveForCart(cart.couponCode, cart.user, items);
+  if (changed) {
+    cart.couponCode = null;
+    await cart.save();
+  }
+
+  return {
     cartId: cart._id.toString(),
-    ...calculateTotals(items, { shippingMethod }),
-  }));
+    couponError,
+    ...calculateTotals(items, { shippingMethod, coupon }),
+  };
 }
 
 export const cartService = {
@@ -131,6 +147,32 @@ export const cartService = {
   async clearCart(userId) {
     const cart = await getOrCreateCart(userId);
     cart.items = [];
+    await cart.save();
+    return respond(cart);
+  },
+
+  /**
+   * Strict validation, unlike the graceful resolution `respond()` does
+   * on every read — a customer actively typing in a code and hitting
+   * "apply" should see a clear error immediately if it's invalid, not
+   * have it silently accepted and then vanish on the next page view.
+   */
+  async applyCoupon(userId, code) {
+    const cart = await getOrCreateCart(userId);
+    const items = await hydrateCartItems(cart.items);
+    if (items.length === 0) {
+      throw ApiError.badRequest('Add items to your cart before applying a coupon.');
+    }
+
+    const coupon = await couponService.validateForCart(code, userId, items);
+    cart.couponCode = coupon.code;
+    await cart.save();
+    return respond(cart);
+  },
+
+  async removeCoupon(userId) {
+    const cart = await getOrCreateCart(userId);
+    cart.couponCode = null;
     await cart.save();
     return respond(cart);
   },

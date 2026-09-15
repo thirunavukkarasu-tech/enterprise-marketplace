@@ -77,6 +77,22 @@ export const clearCart = createAsyncThunk('cart/clear', async (_: void, { reject
   }
 });
 
+export const applyCartCoupon = createAsyncThunk('cart/applyCoupon', async (code: string, { rejectWithValue }) => {
+  try {
+    return await cartApi.applyCoupon(code);
+  } catch (err) {
+    return rejectWithValue(extractErrorMessage(err));
+  }
+});
+
+export const removeCartCoupon = createAsyncThunk('cart/removeCoupon', async (_: void, { rejectWithValue }) => {
+  try {
+    return await cartApi.removeCoupon();
+  } catch (err) {
+    return rejectWithValue(extractErrorMessage(err));
+  }
+});
+
 const cartSlice = createSlice({
   name: 'cart',
   initialState,
@@ -127,6 +143,14 @@ const cartSlice = createSlice({
       .addCase(clearCart.pending, setMutating)
       .addCase(clearCart.fulfilled, setCart)
       .addCase(clearCart.rejected, setMutationError)
+
+      .addCase(applyCartCoupon.pending, setMutating)
+      .addCase(applyCartCoupon.fulfilled, setCart)
+      .addCase(applyCartCoupon.rejected, setMutationError)
+
+      .addCase(removeCartCoupon.pending, setMutating)
+      .addCase(removeCartCoupon.fulfilled, setCart)
+      .addCase(removeCartCoupon.rejected, setMutationError)
 
       // Reacts to auth's logout action rather than authSlice importing
       // this one — same one-directional dependency Phase 5's wishlist

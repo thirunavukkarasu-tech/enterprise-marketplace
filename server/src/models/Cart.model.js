@@ -36,6 +36,13 @@ const cartSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     items: { type: [cartItemSchema], default: [] },
     status: { type: String, enum: ALL_CART_STATUSES, default: CART_STATUS.ACTIVE },
+    // Phase 8: the applied coupon code, if any. Stored on the cart (not
+    // just passed per-request) so it survives between viewing the cart
+    // and reaching checkout, the same way cart items do. Always
+    // re-validated against live coupon rules on every read
+    // (couponService.validateForCart) — never trusted as "already
+    // checked" just because it's sitting here from an earlier request.
+    couponCode: { type: String, default: null },
   },
   { timestamps: true }
 );

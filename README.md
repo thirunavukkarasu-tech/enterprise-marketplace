@@ -5,11 +5,11 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 7 of 11 complete — foundation, authentication & RBAC,
+> **Status**: Phase 8 of 11 complete — foundation, authentication & RBAC,
 > product & category management, vendor management, the customer
-> shopping experience, cart & checkout, plus order processing, inventory,
-> and admin operations. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
-> what's next.
+> shopping experience, cart & checkout, order processing, inventory, and
+> admin operations, plus payments, coupons, and checkout hardening. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
 
 ## Overview
 
@@ -75,10 +75,10 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 | Customer browsing, search, wishlist | 5 ✅ |
 | Cart & checkout | 6 ✅ |
 | Multi-vendor order splitting, inventory, admin operations | 7 ✅ |
-| Real-time delivery tracking (Socket.IO) | 8 |
-| Reviews, coupons, notifications | 9 |
-| Analytics, audit logs, hardening | 10 |
-| Deployment & polish | 11 |
+| Payments (mock provider), coupons, checkout hardening | 8 ✅ |
+| Real-time delivery tracking (Socket.IO) | 9 |
+| Reviews & notifications | 10 |
+| Analytics, testing, hardening & deployment polish | 11 |
 
 ## Design system
 
@@ -156,12 +156,13 @@ hashing, duration parsing, Zod validators, RBAC middleware, slugify/
 unique-slug generation, product ownership rules, product/category/vendor
 validators, vendor status transitions, the Phase 5 customer-experience
 validators for `inStock`/`withCounts`/wishlist/profile, the Phase 6 cart
-pricing calculation + cart/checkout/address validators, and the Phase 7
-order-status transition table + inventory stock-status derivation — 136
+pricing calculation + cart/checkout/address validators, the Phase 7
+order-status transition table + inventory stock-status derivation, and
+the Phase 8 payment status transition table + coupon discount math — 164
 tests, no database required) plus the health-check integration tests (2
-tests). Seven further integration suites need a real MongoDB connection
-and are skipped by default in environments without one (shown as 7
-skip-notice tests in the count, 145 total): the full auth flow (register
+tests). Eight further integration suites need a real MongoDB connection
+and are skipped by default in environments without one (shown as 8
+skip-notice tests in the count, 174 total): the full auth flow (register
 → login → refresh-rotation → logout, reuse detection, generic error
 messages, deactivated-user rejection), category management (cycle
 prevention, deletion guards, active-only public listing), product
@@ -177,11 +178,16 @@ enrichment, category product counts), cart & checkout (cross-customer
 cart isolation, vendor/admin blocked from cart access, client-supplied
 price/subtotal/total silently ignored, price-change detection charging
 the new price, stock validation on every mutation, address ownership,
-checkout validation for empty carts and mismatched addresses), and
+checkout validation for empty carts and mismatched addresses),
 admin/vendor operations (atomic transactional order creation, valid/
 invalid order status transitions, cross-vendor order and inventory
 isolation, negative-stock rejection, admin-only endpoint gating, and
-audit log creation):
+audit log creation), and payments & coupons (percentage/fixed discount
+calculation, max-discount capping, global and per-user usage limits,
+expired/inactive/below-minimum coupon rejection, server-side total
+calculation with client manipulation rejected, payment success/failure,
+invalid payment transitions rejected, and duplicate webhook delivery
+handled idempotently):
 
 ```bash
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/auth.test.js
@@ -191,12 +197,14 @@ TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/i
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/customerExperience.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/cartCheckout.test.js
 TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/adminOperations.test.js
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/marketsphere-test node --test tests/integration/paymentsAndCoupons.test.js
 ```
 
 Each suite creates its own isolated database and drops it when finished.
-**`adminOperations.test.js` needs a replica set, not just a standalone
-`mongod`** — order creation uses a MongoDB transaction, and transactions
-require one. A single-node replica set works fine for local testing
+**`adminOperations.test.js` and `paymentsAndCoupons.test.js` need a
+replica set, not just a standalone `mongod`** — order and payment
+consistency both use MongoDB transactions, which require one. A
+single-node replica set works fine for local testing
 (`mongod --replSet rs0`, then `rs.initiate()` once via `mongosh`); the
 other six suites don't need this.
 
@@ -224,11 +232,13 @@ ownership enforcement), vendor management (self-service onboarding/
 profile/dashboard, and admin approve/reject/suspend/reactivate/verify),
 the customer shopping experience (self-service profile updates,
 wishlist), cart & checkout (server-authoritative pricing, address
-management, checkout review), and orders/inventory/admin operations
+management, checkout review), orders/inventory/admin operations
 (atomic transactional order creation, order lifecycle management,
 inventory adjustment with an auditable ledger, an operational audit log,
-and admin dashboard/customer-management aggregations) is in
-[`docs/API.md`](docs/API.md). Payment processing and other domain
+and admin dashboard/customer-management aggregations), and payments &
+coupons (a provider-agnostic payment abstraction with a mock provider,
+idempotent webhook handling, and platform-wide discount codes) is in
+[`docs/API.md`](docs/API.md). Delivery tracking and other domain
 endpoints are added there as their phases ship.
 
 ## Health check

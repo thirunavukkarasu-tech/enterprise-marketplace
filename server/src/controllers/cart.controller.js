@@ -26,4 +26,14 @@ export const cartController = {
     const cart = await cartService.clearCart(req.user.id);
     new ApiResponse(200, { cart }, 'Cart cleared').send(res);
   },
+
+  async applyCoupon(req, res) {
+    const cart = await cartService.applyCoupon(req.user.id, req.body.code);
+    new ApiResponse(200, { cart }, 'Coupon applied').send(res);
+  },
+
+  async removeCoupon(req, res) {
+    const cart = await cartService.removeCoupon(req.user.id);
+    new ApiResponse(200, { cart }, 'Coupon removed').send(res);
+  },
 };

@@ -11,14 +11,14 @@
 | 5 | Customer shopping experience | ✅ Complete |
 | 6 | Cart & checkout | ✅ Complete |
 | 7 | Orders, inventory & admin operations | ✅ Complete* |
-| 8 | Delivery & real-time tracking | ⏳ Next |
-| 9 | Reviews, coupons & notifications | Planned |
-| 10 | Analytics, audit logs, testing & hardening | Planned |
-| 11 | Deployment, documentation & portfolio polish | Planned |
+| 8 | Payments, coupons & checkout hardening | ✅ Complete |
+| 9 | Delivery & real-time tracking | ⏳ Next |
+| 10 | Reviews & notifications | Planned |
+| 11 | Analytics, testing, hardening & deployment polish | Planned |
 
-\* Real payment gateway integration is intentionally still deferred —
-see the Phase 7 summary below. Orders are created and fulfilled through
-their full lifecycle; nothing charges a card yet.
+\* Real payment gateway integration was still deferred as of Phase 7 —
+Phase 8 below is what actually delivered it (via a mock provider, not a
+real one; see that phase's summary).
 
 ## Phase 2 summary — Authentication & RBAC (complete)
 
@@ -282,10 +282,63 @@ their full lifecycle; nothing charges a card yet.
   against a real MongoDB **replica set** (order creation uses
   transactions, which require one); see `README.md` for how
 
-## Phase 8 preview — Delivery & Real-Time Tracking
+## Phase 8 summary — Payments, Coupons & Checkout Hardening (complete)
+
+- A real payment abstraction (`paymentService.js` + `mockPaymentProvider.js`)
+  — `initiate`/`verify`/webhook, a full status lifecycle
+  (`pending → processing → paid`, terminal `failed`/`cancelled`/
+  `refunded`) enforced by a server-side transition whitelist, the same
+  pattern as order and vendor status. **No real gateway is integrated** —
+  the mock provider is explicit about being one, never pretending
+  otherwise (see `docs/SECURITY.md` §8), so this is a boundary already
+  built and exercised end-to-end, not a promise deferred
+- `Payment` and `Order` updated inside one MongoDB transaction on every
+  outcome — no instant where a reader could see the two documents
+  disagree about whether an order is paid; a failed payment leaves the
+  order untouched (awaiting retry), never auto-cancelled
+- A webhook endpoint that's idempotent by construction — tries to
+  *insert* the provider's event id before doing anything else, so a
+  duplicate delivery hits a unique-index conflict rather than being
+  caught by a race-prone "check then act" read
+- A platform-wide coupon system (percentage/fixed, minimum order value,
+  optional max discount cap, optional start/expiry window, global and
+  per-user usage limits) — pulled forward from the original Phase 9 slot
+  since it's inseparable from checkout hardening in practice. Per-vendor
+  coupons remain a documented, additive extension point, not built
+  (see `docs/DATABASE.md`)
+- One eligibility-checking function (`couponService.validateForCart`)
+  used identically whether a customer is applying a code or an order is
+  being created — never two copies of the same rules that could drift
+  apart
+- Coupon usage recorded inside the same transaction as order creation —
+  a coupon tried during a checkout preview that's abandoned never
+  consumes the usage limit; two simultaneous last-use race conditions are
+  serialized by the transaction rather than both succeeding
+- A discount can never make a total negative and never exceeds what it's
+  discounting — enforced at the calculation source and again as an
+  independent floor on the grand total, not relying on either check
+  alone
+- Frontend: checkout extended with a payment step (method selection,
+  processing/success/failure states, an honest "simulate a failed
+  payment (demo only)" affordance rather than hiding that this is a
+  mock), a coupon input on the cart page reflecting only server-decided
+  values, and an admin coupon management page
+- **A real gap found and fixed while wiring this phase together**: the
+  admin coupon management page was fully built but had no route or nav
+  item — the same class of integration gap caught in Phases 6 and 7,
+  fixed the same way (wired, not rebuilt)
+- 28 new passing unit tests (payment status transitions, coupon discount
+  math, payment/coupon validators) + a comprehensive integration suite
+  covering every item in the spec's minimum test list, including
+  webhook-duplicate-delivery idempotency — written and ready to run
+  against a real MongoDB **replica set** (payment/order consistency uses
+  transactions, same requirement as Phase 7's order creation); see
+  `README.md` for how
+
+## Phase 9 preview — Delivery & Real-Time Tracking
 
 - Delivery partner assignment to a `vendorGroups` shipment, building on
-  the order lifecycle this phase just built rather than a parallel one
+  the order lifecycle Phase 7 built rather than a parallel one
 - The first real business event registered on the Socket.IO server that
   has sat initialized-but-unused since Phase 1 (`docs/ARCHITECTURE.md`
   §5) — live shipment location/status push

@@ -139,11 +139,18 @@ role; REST also makes the security review (which route can which role
 call) much easier to reason about, which matters for a marketplace
 handling payments and PII.
 
-## 7. Payment abstraction (why no gateway yet)
+## 7. Payment abstraction (why no real gateway yet)
 
-`services/paymentService.js` (added in Phase 7) will define a provider
-interface — `initiate`, `verify`, `refund` — with an in-memory/mock
-implementation for local development. Stripe or Razorpay can be plugged in
-later by implementing the same interface, without touching order or
-checkout logic. This mirrors how a real team would sequence the work:
-business logic and webhooks-shaped architecture first, real money second.
+`services/paymentService.js` (Phase 8) defines the provider-facing
+interface every payment flows through — `initiate`, `verify`,
+`processWebhookEvent` — with `utils/mockPaymentProvider.js` as the only
+implementation behind it today. A real provider (Stripe, Razorpay) would
+replace that one file's exports with genuine API calls and drop the
+`simulate` parameter `verify` accepts (a testing affordance with no
+provider to ask for a real outcome) — `paymentService`, the `Payment`
+model, the order/payment-consistency transaction, and the webhook route
+would all stay exactly as they are. This mirrors how a real team would
+sequence the work: business logic, order/payment consistency, and
+webhook-shaped architecture first, a real provider integration second —
+not a promise deferred, but a boundary already built and exercised
+end-to-end against a stand-in.

@@ -326,7 +326,87 @@ requirements below map directly to
   approving a vendor must succeed even if the audit log has a transient
   write error.
 
-## 8. Input validation
+## 8. Payments & coupons (Phase 8 — implemented)
+
+**No real payment gateway is integrated.** Everything below describes
+the abstraction and the mock provider that exercises it end-to-end —
+not a claim that this app can move real money. See
+`docs/ARCHITECTURE.md` §7 for what a real provider integration adds.
+
+- **No raw payment credentials are ever stored, anywhere.** The
+  `Payment` model has no field for a card number, CVV, or bank account
+  number — `providerMetadata` is explicitly documented and enforced by
+  convention (there's nothing else to put there) to hold only safe
+  references (a masked card suffix, a mock response code). Storing
+  anything more would pull this app into PCI-DSS scope for no reason a
+  mock provider needs.
+- **The client can never declare a payment's outcome.** `POST
+  /payments/:id/verify` asks the *provider* (the mock, standing in for a
+  real one) what happened; a request body's `simulate` field is only
+  ever honored when `payment.provider === 'mock'` — checked explicitly
+  in `paymentService.verify`, not left to the fact that no other
+  provider currently exists. A real provider integration removes this
+  field entirely rather than needing to newly restrict it, since the
+  restriction is already in the code, not assumed.
+- **Payment status transitions are a server-side whitelist**
+  (`PAYMENT_STATUS_TRANSITIONS`), the same pattern as order and vendor
+  status — verifying an already-`paid` payment is rejected with a `400`,
+  not silently re-applied.
+- **`Payment` and `Order` are updated inside one MongoDB transaction**
+  (`paymentService.applyOutcome`) — there is no instant where one
+  document says a payment succeeded and the other still shows it
+  pending. A failed payment leaves the order exactly as it was; it does
+  not cancel the order or otherwise invent a state nothing asked for.
+- **The webhook is idempotent by construction, not by a checked flag.**
+  `paymentService.processWebhookEvent` attempts to *insert* the
+  provider's event id into `PaymentWebhookEvent` before doing anything
+  else; a duplicate delivery hits a unique-index conflict and is
+  discarded. This is safe under concurrent duplicate deliveries in a way
+  a "look up the id, then act if not found" pattern is not — two
+  simultaneous deliveries can both pass a read-check before either has
+  written anything, and a unique-index insert can't have that race.
+- **The webhook has no authenticity check today, and doesn't fake one.**
+  A real provider signs its webhook payloads with a shared secret; this
+  app has no real provider, so there is nothing to verify a signature
+  against. Rather than invent a check that would create false confidence
+  (e.g. trusting a client-supplied "signature" header with no secret
+  behind it), the route comment in `payment.route.js` documents this as
+  the extension point a real integration adds, and idempotency is kept
+  fully independent of authenticity so it protects the endpoint either
+  way.
+- **Coupon eligibility is checked identically whether a customer is
+  applying a code or an order is about to be created — one function,
+  `couponService.validateForCart`, not two.** Existence, active status,
+  start/expiry dates, minimum order value, global usage limit, and
+  per-user usage limit are all checked every time, from the database,
+  never trusted from an earlier "applied" response. `resolveForCart`
+  (used only for non-committing reads like `GET /cart`) wraps the same
+  function but degrades a failure to a cleared coupon + message instead
+  of throwing — a page view should never hard-fail because a coupon
+  expired since it was applied, but placing an order still must.
+- **A discount can never make a total negative, and never exceeds what
+  it's discounting.** `cartPricingService.calculateDiscount` clamps to
+  `maxDiscountAmount` (if set) and then to the eligible subtotal itself,
+  and `calculateTotals` applies a final `Math.max(grandTotal, 0)` floor
+  as a second, independent safeguard — not relying on the discount clamp
+  alone to guarantee a sane result.
+- **Coupon usage limits are race-resistant by transaction, not by a
+  read-then-write check on `usageCount` alone.** `couponService.recordUsage`
+  writes a `CouponUsage` document and increments `Coupon.usageCount`
+  inside the same MongoDB transaction as order creation
+  (`orderService.createFromCart`) — a coupon "applied" during a checkout
+  preview that never becomes an order never consumes the limit, and two
+  simultaneous order-placements against the last remaining use are
+  serialized by the transaction rather than both succeeding.
+- **Admin coupon management is fully closed to every other role** —
+  `admin.route.js` gates its entire router on `super_admin`, with no
+  vendor-scoped or customer-scoped variant of any coupon-management
+  route (contrast with `/products/manage`, which is intentionally shared
+  between vendor and admin). Coupon codes are normalized to uppercase
+  server-side before the uniqueness check and before storage, so `SAVE10`
+  and `save10` can never coexist as two different coupons.
+
+## 9. Input validation
 
 - Every request body passes through a Zod schema (`validators/`) before
   reaching a controller. Validation failures return a `400` with
@@ -340,7 +420,7 @@ requirements below map directly to
 - `hpp` guards against HTTP parameter pollution (repeated query keys used
   to smuggle unexpected array values into a handler expecting a string).
 
-## 9. Transport & headers
+## 10. Transport & headers
 
 - **Helmet** sets standard security headers (`X-Content-Type-Options`,
   `X-Frame-Options`, a Content-Security-Policy in production, etc.).
@@ -351,7 +431,7 @@ requirements below map directly to
 - All cookies are `secure` in production (HTTPS-only) and signed
   (`COOKIE_SECRET`).
 
-## 10. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
+## 11. Rate limiting (Phase 1 global limiter; Phase 2 applies it to auth routes)
 
 - A lenient **global limiter** on all `/api/v1/*` routes protects against
   basic abuse without bothering normal traffic.
@@ -363,7 +443,7 @@ requirements below map directly to
   surfaces in the same way, and a legitimate user shouldn't be throttled
   for normal use.
 
-## 11. Error handling
+## 12. Error handling
 
 - All errors funnel through one `errorHandler` middleware. Operational
   errors (`ApiError`, expected 4xx conditions) return their real message.
@@ -372,7 +452,7 @@ requirements below map directly to
   trace are logged server-side only, never leaked in the response, even in
   a way that could reveal internal file paths or library versions.
 
-## 12. File uploads (not yet implemented)
+## 13. File uploads (not yet implemented)
 
 - Uploads (product images, vendor logo/banner, KYC documents) are
   validated by MIME-type allowlist and size limit before being forwarded
@@ -383,7 +463,7 @@ requirements below map directly to
   handling uploads directly — no domain in the app owns file-upload
   infrastructure yet.
 
-## 13. Secrets
+## 14. Secrets
 
 - All secrets (JWT signing keys, DB URI, storage credentials) are read
   from environment variables via a single validated `config/env.js` —
@@ -391,7 +471,7 @@ requirements below map directly to
   `.env.example` documents every variable a deployer needs to set without
   containing any real value.
 
-## 14. Audit logging (Phase 7 — implemented; full compliance subsystem still Phase 10)
+## 15. Audit logging (Phase 7 — implemented; full compliance subsystem still Phase 10)
 
 A queryable `AuditLog` collection now exists (see `docs/DATABASE.md`),
 recording every action in the closed `AUDIT_ACTION` set — vendor
@@ -413,7 +493,7 @@ operational/security logs for debugging and intrusion detection, a
 different concern from the business-action trail `AuditLog` exists for,
 and conflating the two would blur what each is actually for.
 
-## 15. What's intentionally deferred
+## 16. What's intentionally deferred
 
 No payment gateway is integrated yet (see `ARCHITECTURE.md` §7) — there is
 no PCI-scope surface to secure in Phase 1–6. Two-factor authentication and

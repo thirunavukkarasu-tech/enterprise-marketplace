@@ -37,6 +37,12 @@ export interface Cart {
   items: CartItem[];
   itemCount: number;
   subtotal: number;
+  couponCode: string | null;
+  /** Set when a previously-applied coupon has since become invalid
+   * (expired, hit its limit, cart no longer meets the minimum) — the
+   * server clears the stored code and explains why, rather than
+   * silently dropping the discount with no explanation. */
+  couponError: string | null;
   discountAmount: number;
   taxAmount: number;
   shippingMethod: ShippingMethod;

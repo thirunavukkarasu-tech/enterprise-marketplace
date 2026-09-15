@@ -33,4 +33,16 @@ export const cartApi = {
     const res = await apiClient.delete<Envelope<{ cart: Cart }>>('/cart');
     return res.data.data.cart;
   },
+
+  /** Mounted under /cart, not /checkout — coupon state lives on the
+   * Cart document server-side (see server/src/routes/v1/cart.route.js). */
+  async applyCoupon(code: string) {
+    const res = await apiClient.post<Envelope<{ cart: Cart }>>('/cart/coupon', { code });
+    return res.data.data.cart;
+  },
+
+  async removeCoupon() {
+    const res = await apiClient.delete<Envelope<{ cart: Cart }>>('/cart/coupon');
+    return res.data.data.cart;
+  },
 };

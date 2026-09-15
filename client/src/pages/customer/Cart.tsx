@@ -2,13 +2,14 @@ import { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart, Minus, Plus, Trash2, ImageOff, AlertTriangle, ArrowRight } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
-import { fetchCart, updateCartItemQuantity, removeCartItem, clearCart } from '../../features/cart/cartSlice';
+import { fetchCart, updateCartItemQuantity, removeCartItem, clearCart, applyCartCoupon, removeCartCoupon } from '../../features/cart/cartSlice';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/common/Spinner';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ErrorState } from '../../components/common/ErrorState';
+import { CouponInput } from '../../components/checkout/CouponInput';
 import type { CartItem, CartItemIssue } from '../../types/cart';
 
 function formatPrice(amount: number) {
@@ -189,6 +190,16 @@ export function Cart() {
           <Card>
             <CardBody className="flex flex-col gap-3">
               <h2 className="font-medium text-ink">Order summary</h2>
+
+              <CouponInput
+                appliedCode={cart.couponCode}
+                couponError={cart.couponError}
+                discountAmount={cart.discountAmount}
+                mutating={mutating}
+                onApply={(code) => dispatch(applyCartCoupon(code))}
+                onRemove={() => dispatch(removeCartCoupon())}
+              />
+
               <div className="flex justify-between text-sm text-ink-soft">
                 <span>Subtotal ({cart.itemCount} items)</span>
                 <span className="font-mono">{formatPrice(cart.subtotal)}</span>

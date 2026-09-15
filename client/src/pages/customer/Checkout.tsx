@@ -1,10 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MapPin, Truck, ClipboardCheck, ChevronLeft, ChevronRight, AlertTriangle, Plus, CheckCircle2, PartyPopper } from 'lucide-react';
+import {
+  MapPin,
+  Truck,
+  ClipboardCheck,
+  ChevronLeft,
+  ChevronRight,
+  AlertTriangle,
+  Plus,
+  CheckCircle2,
+  PartyPopper,
+  CreditCard,
+  Smartphone,
+  XCircle,
+  Tag,
+} from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../hooks/useAppStore';
 import { addressApi } from '../../features/address/addressApi';
 import { checkoutApi } from '../../features/checkout/checkoutApi';
 import { orderApi } from '../../features/order/orderApi';
+import { paymentApi } from '../../features/payment/paymentApi';
 import { fetchCart } from '../../features/cart/cartSlice';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody } from '../../components/ui/Card';
@@ -14,6 +29,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { AddressForm } from '../../components/checkout/AddressForm';
 import type { Address, AddressInput, CheckoutSummary, ShippingMethod } from '../../types/cart';
 import type { Order } from '../../types/order';
+import type { Payment, PaymentMethod } from '../../types/payment';
 import { cn } from '../../utils/cn';
 
 function formatPrice(amount: number) {
@@ -25,6 +41,7 @@ const STEPS = [
   { key: 'shipping', label: 'Shipping' },
   { key: 'delivery', label: 'Delivery' },
   { key: 'review', label: 'Review' },
+  { key: 'payment', label: 'Payment' },
 ] as const;
 
 type StepKey = (typeof STEPS)[number]['key'];
@@ -32,6 +49,11 @@ type StepKey = (typeof STEPS)[number]['key'];
 const SHIPPING_OPTIONS: { value: ShippingMethod; label: string; blurb: string }[] = [
   { value: 'standard', label: 'Standard', blurb: '5–7 business days · Free' },
   { value: 'express', label: 'Express', blurb: '1–2 business days' },
+];
+
+const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
+  { value: 'card', label: 'Card', icon: CreditCard },
+  { value: 'upi', label: 'UPI', icon: Smartphone },
 ];
 
 function StepIndicator({ current }: { current: StepKey }) {
@@ -73,6 +95,18 @@ export function Checkout() {
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
+
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [paymentPhase, setPaymentPhase] = useState<'idle' | 'processing' | 'paid' | 'failed'>('idle');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  // Demo-only affordance: this app's payment provider is an explicit mock
+  // (see server/src/utils/mockPaymentProvider.js) with no real gateway to
+  // ask for a genuine decline, so this checkbox is the only way to see
+  // the failure UI. A real provider integration would remove this
+  // control entirely — the outcome would come from the provider, never
+  // from the customer's own browser.
+  const [simulateFailure, setSimulateFailure] = useState(false);
 
   const loadAddresses = () => {
     setAddressStatus('loading');
@@ -128,11 +162,32 @@ export function Checkout() {
       const order = await orderApi.createFromCart({ shippingAddressId: selectedAddressId, shippingMethod });
       setPlacedOrder(order);
       dispatch(fetchCart(undefined)); // server-side cart is now empty; sync the header badge and cart page
+      setStep('payment');
     } catch (err) {
       const anyErr = err as { response?: { data?: { message?: string } } };
       setPlaceError(anyErr.response?.data?.message ?? 'Could not place your order. Please review your cart and try again.');
     } finally {
       setPlacing(false);
+    }
+  };
+
+  const handlePay = async () => {
+    if (!placedOrder) return;
+    setPaymentPhase('processing');
+    setPaymentError(null);
+    try {
+      const initiated = await paymentApi.initiate({ orderId: placedOrder._id, method: paymentMethod });
+      setPayment(initiated);
+      const verified = await paymentApi.verify(initiated._id, simulateFailure ? 'failure' : 'success');
+      setPayment(verified);
+      setPaymentPhase(verified.status === 'paid' ? 'paid' : 'failed');
+      if (verified.status !== 'paid') {
+        setPaymentError(verified.failureReason ?? 'Your payment could not be completed.');
+      }
+    } catch (err) {
+      const anyErr = err as { response?: { data?: { message?: string } } };
+      setPaymentError(anyErr.response?.data?.message ?? 'Something went wrong while processing your payment.');
+      setPaymentPhase('failed');
     }
   };
 
@@ -148,8 +203,8 @@ export function Checkout() {
     <div className="mx-auto max-w-2xl px-6 py-10">
       <h1 className="mb-2 text-2xl font-semibold">Checkout</h1>
       <p className="mb-6 text-sm text-slate">
-        Review your order before it's placed. Payment processing isn't wired up yet — placing an order reserves
-        stock but doesn't charge a card.
+        Review your order, then complete payment. This app uses a mock payment
+        provider for demo purposes — no real card is ever charged.
       </p>
 
       <StepIndicator current={step} />
@@ -298,18 +353,88 @@ export function Checkout() {
         </Card>
       )}
 
-      {step === 'review' && placedOrder && (
+      {step === 'payment' && placedOrder && paymentPhase !== 'paid' && (
+        <Card>
+          <CardBody className="flex flex-col gap-4">
+            <h2 className="font-medium text-ink">Payment</h2>
+            <p className="text-sm text-slate">
+              Order <span className="font-mono font-medium text-ink">{placedOrder.orderNumber}</span> is placed and
+              stock is reserved. Complete payment to confirm it.
+            </p>
+
+            <div className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-ink-soft">Amount due</span>
+                <span className="font-mono font-semibold text-ink">{formatPrice(placedOrder.grandTotal)}</span>
+              </div>
+            </div>
+
+            {paymentPhase === 'failed' && (
+              <div className="flex items-start gap-2 rounded-md bg-coral-100 px-3 py-2 text-sm text-coral-600">
+                <XCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{paymentError ?? 'Your payment could not be completed.'}</span>
+              </div>
+            )}
+
+            {paymentPhase !== 'processing' && (
+              <>
+                <div>
+                  <p className="mb-2 text-sm font-medium text-ink-soft">Payment method</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PAYMENT_METHOD_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setPaymentMethod(opt.value)}
+                          className={cn(
+                            'flex items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-medium',
+                            paymentMethod === opt.value ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-ink-soft'
+                          )}
+                        >
+                          <Icon size={16} /> {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-slate">
+                  <input type="checkbox" checked={simulateFailure} onChange={(e) => setSimulateFailure(e.target.checked)} />
+                  Simulate a failed payment (demo only — this app has no real payment gateway)
+                </label>
+              </>
+            )}
+
+            {paymentPhase === 'processing' && (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <Spinner />
+                <p className="text-sm text-slate">Processing payment…</p>
+              </div>
+            )}
+
+            {paymentPhase !== 'processing' && (
+              <Button onClick={handlePay} className="self-end">
+                {paymentPhase === 'failed' ? 'Try again' : `Pay ${formatPrice(placedOrder.grandTotal)}`}
+              </Button>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
+      {step === 'payment' && paymentPhase === 'paid' && placedOrder && (
         <Card>
           <CardBody className="flex flex-col items-center gap-3 py-10 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
               <PartyPopper size={22} />
             </span>
-            <h2 className="text-lg font-semibold text-ink">Order placed</h2>
+            <h2 className="text-lg font-semibold text-ink">Payment successful</h2>
             <p className="max-w-sm text-sm text-slate">
-              Your order <span className="font-mono font-medium text-ink">{placedOrder.orderNumber}</span> has been
-              placed. Payment processing arrives in a later phase — for now, this confirms the order and reserved
-              stock.
+              Order <span className="font-mono font-medium text-ink">{placedOrder.orderNumber}</span> is paid and
+              confirmed.
             </p>
+            {payment && <p className="font-mono text-xs text-slate">Transaction {payment.transactionId}</p>}
             <div className="mt-2 flex gap-3">
               <Link to="/orders">
                 <Button variant="secondary">View my orders</Button>
@@ -369,6 +494,14 @@ export function Checkout() {
                 <span>Subtotal</span>
                 <span className="font-mono">{formatPrice(summary.subtotal)}</span>
               </div>
+              {summary.discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600">
+                  <span className="flex items-center gap-1">
+                    <Tag size={12} /> Discount {summary.couponCode ? `(${summary.couponCode})` : ''}
+                  </span>
+                  <span className="font-mono">-{formatPrice(summary.discountAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-ink-soft">
                 <span>Shipping</span>
                 <span className="font-mono">{summary.shippingFee > 0 ? formatPrice(summary.shippingFee) : 'Free'}</span>
@@ -394,8 +527,7 @@ export function Checkout() {
               </Button>
             </div>
             <p className="text-center text-xs text-slate">
-              Placing this order reserves stock immediately. Payment processing isn't wired up yet — this app
-              doesn't charge a card.
+              Placing this order reserves stock immediately. You'll complete payment on the next step.
             </p>
           </CardBody>
         </Card>
