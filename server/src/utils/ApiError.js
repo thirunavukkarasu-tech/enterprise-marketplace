@@ -7,13 +7,14 @@
  * response body.
  */
 export class ApiError extends Error {
-  constructor(statusCode, message, { errors = [], isOperational = true, stack = '' } = {}) {
+  constructor(statusCode, message, { errors = [], isOperational = true, stack = '', code } = {}) {
     super(message);
     this.name = 'ApiError';
     this.statusCode = statusCode;
     this.success = false;
     this.errors = errors;
     this.isOperational = isOperational;
+    this.code = code;
 
     if (stack) {
       this.stack = stack;

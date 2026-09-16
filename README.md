@@ -5,11 +5,11 @@ demonstrate how a real product team would architect, secure, and ship a
 system with four distinct user roles (Super Admin, Vendor, Customer,
 Delivery Partner) sharing one platform.
 
-> **Status**: Phase 8 of 11 complete — foundation, authentication & RBAC,
-> product & category management, vendor management, the customer
-> shopping experience, cart & checkout, order processing, inventory, and
-> admin operations, plus payments, coupons, and checkout hardening. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
+> **Status**: Phase 9 of 11 complete — the full marketplace (auth & RBAC,
+> catalog, vendors, storefront, cart & checkout, orders & inventory, admin
+> operations, payments & coupons), now production-hardened: security
+> review, structured logging with request correlation, CI, and deployment
+> readiness. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's next.
 
 ## Overview
 
@@ -76,9 +76,9 @@ abstraction · Vercel (frontend) · Render/Railway (backend)
 | Cart & checkout | 6 ✅ |
 | Multi-vendor order splitting, inventory, admin operations | 7 ✅ |
 | Payments (mock provider), coupons, checkout hardening | 8 ✅ |
-| Real-time delivery tracking (Socket.IO) | 9 |
-| Reviews & notifications | 10 |
-| Analytics, testing, hardening & deployment polish | 11 |
+| Production hardening, testing, observability, CI & deployment readiness | 9 ✅ |
+| Real-time delivery tracking (Socket.IO) | 10 |
+| Reviews & notifications | 11 |
 
 ## Design system
 
@@ -159,10 +159,16 @@ validators for `inStock`/`withCounts`/wishlist/profile, the Phase 6 cart
 pricing calculation + cart/checkout/address validators, the Phase 7
 order-status transition table + inventory stock-status derivation, and
 the Phase 8 payment status transition table + coupon discount math — 164
-tests, no database required) plus the health-check integration tests (2
-tests). Eight further integration suites need a real MongoDB connection
-and are skipped by default in environments without one (shown as 8
-skip-notice tests in the count, 174 total): the full auth flow (register
+tests, no database required) plus two database-free integration suites:
+the health-check tests (2 tests) and the Phase 9 hardening suite (19
+tests — error-envelope shape, request-id correlation, malformed and
+oversized body handling, invalid ObjectId, pagination bounds, sort-enum
+injection, security headers, and a check that the health endpoint leaks
+no secrets). Those run on every CI run precisely because they need no
+database. Eight further integration suites do need a real MongoDB
+connection and are skipped by default in environments without one (shown
+as 8 skip-notice tests in the count, 193 total): the full auth flow
+(register
 → login → refresh-rotation → logout, reuse detection, generic error
 messages, deactivated-user rejection), category management (cycle
 prevention, deletion guards, active-only public listing), product
@@ -247,14 +253,152 @@ endpoints are added there as their phases ship.
 GET http://localhost:5000/api/v1/health
 ```
 
+## Security
+
+Security decisions are documented per-phase, with reasoning, in
+[`docs/SECURITY.md`](docs/SECURITY.md). In summary:
+
+- **Authentication** — bcrypt password hashing, short-lived JWT access
+  tokens, refresh token rotation with reuse detection, httpOnly
+  `sameSite=strict` refresh cookies, generic auth errors that don't
+  reveal whether an account exists.
+- **Authorization** — RBAC on every protected route, plus a second,
+  separate layer of per-resource ownership checks. A vendor cannot read
+  or modify another vendor's products, orders, or inventory; a customer
+  cannot reach another customer's cart, addresses, orders, or wishlist.
+  Where a resource should never be addressable by id at all (a user's own
+  cart or profile), the route simply takes no id and resolves everything
+  from the verified token — IDOR prevented structurally rather than by a
+  runtime check.
+- **Server-authoritative money** — price, discount, tax, shipping, and
+  order totals are always recomputed server-side from live database
+  state. The cart, checkout, and coupon request schemas contain no field
+  for a price, discount, or total, so a manipulated client payload has
+  nothing to manipulate. Payment status likewise comes from the provider
+  abstraction, never from the client.
+- **Input validation** — every request body, query, and route param
+  passes a Zod schema before reaching a controller: bounded string
+  lengths, validated enums, validated ObjectIds, bounded pagination, and
+  closed sort/filter allowlists (the client sends a sort *name*, never a
+  database sort expression).
+- **Transport & platform** — Helmet security headers, a single-origin
+  CORS allowlist with credentials, global and stricter auth-specific rate
+  limiting, a 10 kb JSON body cap, NoSQL-injection sanitisation, and HTTP
+  parameter-pollution protection.
+- **Safe errors** — one centralised handler returns a consistent shape
+  with a stable machine-readable `error.code`. Stack traces and internal
+  details are never sent in production; unexpected errors return a
+  generic message while the real error is logged server-side.
+- **Secrets** — `.env` is gitignored, every variable is validated at
+  boot, and `.env.example` holds placeholders only. No card numbers, CVVs,
+  or payment credentials are stored anywhere, by design.
+
+Vulnerability reporting: [`SECURITY.md`](SECURITY.md).
+
+## Testing
+
+```bash
+cd server && npm test
+```
+
+193 backend tests. The unit suite (164) covers the logic worth protecting
+against regression — JWT and token handling, RBAC, per-resource
+ownership, order and payment status transition tables, inventory
+stock-status rules, coupon discount maths, and every Zod validator.
+
+A **hardening suite** (19 tests) verifies the cross-cutting API
+guarantees that hold regardless of business domain: every error carries
+a stable machine-readable `error.code`, no response leaks a stack trace,
+every request is traceable by `X-Request-ID` (and a malformed
+caller-supplied id is never echoed back), malformed JSON is a 400 and an
+oversized body a 413 rather than an unhandled 500, invalid ObjectIds and
+out-of-range pagination are rejected, `sort` is a closed enum that can't
+be used to inject a Mongo sort document, and security/rate-limit headers
+are present. It needs no database, so it runs on every CI run.
+
+Eight integration suites exercise full HTTP flows against a real
+database, including an explicit set of **security regression tests**:
+cross-tenant IDOR attempts, privilege escalation, mass-assignment of
+admin-controlled fields, coupon and price manipulation, invalid status
+transitions, and duplicate webhook delivery. They self-skip when
+`TEST_MONGODB_URI` is unset, so `npm test` is always runnable — see
+[Run backend tests](#run-backend-tests) for how to run them against a
+local MongoDB.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push
+and pull request:
+
+| Job | Steps |
+|---|---|
+| **Server** | `npm ci` → lint → test → `npm audit --audit-level=high --omit=dev` |
+| **Client** | `npm ci` → lint → build (runs `tsc -b` first, so a type error fails the build) → audit |
+| **Server (integration)** | starts MongoDB as a single-node replica set, then runs the database-backed suites |
+
+The integration job starts `mongod` explicitly with `--replSet` rather
+than using a service container, because order creation and payment/order
+consistency use MongoDB transactions — which require a replica set, and
+a service container gives no way to pass that flag.
+
+## Performance
+
+- **Pagination everywhere it matters** — product, order, vendor,
+  customer, coupon, inventory, and audit-log listings are all paginated
+  with bounded `limit` values, returning `meta` alongside the data.
+- **Indexes backing real query patterns** — added per phase for the
+  queries that actually exist, not speculatively; the reasoning (and the
+  explicit decisions *not* to add one) is recorded in
+  [`docs/DATABASE.md`](docs/DATABASE.md).
+- **Aggregations over N+1 loops** — dashboard KPIs, category product
+  counts, and customer order/spend totals are each a single aggregation
+  rather than a query per row.
+- **Projections on populate** — populated references select only the
+  fields the response needs, so a joined `User` never carries its
+  password hash or token state into memory.
+- **Route-level code splitting** — the admin and vendor dashboards are
+  lazily loaded. They're role-gated and are the only screens importing
+  `recharts`, so a customer never downloads them: the main bundle is
+  ~476 kB (~139 kB gzipped) with the ~329 kB charting chunk fetched only
+  when an admin or vendor actually opens a dashboard.
+- **Denormalised where it pays** — e.g. `Product.priceRange`, so
+  storefront price sorting and filtering don't unwind a variants array on
+  every query.
+
 ## Deployment
 
-- **Frontend** → Vercel (static build, `client/`)
-- **Backend** → Render or Railway (`server/`, exposes `PORT` from env)
-- **Database** → MongoDB Atlas
+| Piece | Target |
+|---|---|
+| Frontend | Vercel or any static host — `cd client && npm run build`, serve `dist/` |
+| Backend | Render, Railway, Fly.io, or any Node host — `cd server && npm start` |
+| Database | MongoDB Atlas (**replica set required** — transactions are used) |
 
-Deployment steps and environment configuration are documented in full once
-Phase 11 wires up CI/CD — the project is intentionally local-first until then.
+**Node.js 20+** on both sides.
+
+Before deploying:
+
+1. Set every variable in [`server/.env.example`](server/.env.example) on
+   the backend host. The server validates them at boot and refuses to
+   start with a clear message if any are missing or malformed — it will
+   not start half-configured. Generate each secret with
+   `openssl rand -base64 48`; the access and refresh secrets must differ.
+2. Set `CLIENT_URL` to the deployed frontend origin. CORS is a
+   single-origin allowlist, so a wrong value here blocks the browser from
+   calling the API at all.
+3. Set `VITE_API_URL` on the frontend host to the deployed API's
+   `/api/v1` base. It's baked in at build time, so it must be present
+   *before* the build runs, not after.
+4. Set `NODE_ENV=production`. This is what switches error responses to
+   their safe form, enables the production CSP, and marks cookies
+   `secure`.
+5. Point a health check at `GET /api/v1/health`. It reports process
+   uptime, environment, and live database connectivity without exposing
+   configuration.
+
+The server handles `SIGTERM`/`SIGINT` gracefully — it stops accepting new
+connections, closes WebSocket and HTTP servers, then closes the MongoDB
+connection, with a 10-second forced-exit backstop — so rolling deploys
+and container restarts don't sever in-flight requests.
 
 ## Future improvements
 

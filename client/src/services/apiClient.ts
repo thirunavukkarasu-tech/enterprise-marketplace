@@ -4,10 +4,17 @@ import axios, { type InternalAxiosRequestConfig } from 'axios';
  * `withCredentials: true` so the httpOnly refresh-token cookie set by the
  * API is sent automatically — the access token itself is kept in memory
  * (Redux), never in localStorage, to limit XSS exposure.
+ *
+ * `timeout` bounds how long a hung request can occupy the UI. 20s is
+ * deliberately generous: the slowest legitimate endpoints in this app
+ * are the admin dashboard aggregations and order creation (a multi-
+ * document MongoDB transaction), neither of which should be cut off
+ * mid-flight by an impatient client default.
  */
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1',
   withCredentials: true,
+  timeout: 20000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -52,6 +59,28 @@ interface RetryableConfig extends InternalAxiosRequestConfig {
   _retried?: boolean;
 }
 
+/**
+ * Requests that must never be silently replayed after a token refresh.
+ *
+ * The 401-retry below is safe for reads and for idempotent writes, but a
+ * payment mutation is neither: `POST /payments` creates a new payment
+ * attempt each time it's called, so a transparent retry could produce a
+ * second attempt the customer never asked for. If one of these 401s, the
+ * refresh still happens (so the session recovers), but the original
+ * request is surfaced as an error for the UI to handle deliberately
+ * rather than being replayed behind the user's back.
+ *
+ * `GET /payments/:id` is a read and would be safe, but the whole prefix
+ * is excluded rather than pattern-matching method+path — the conservative
+ * default is the right one for the only endpoints in this app that move
+ * (simulated) money.
+ */
+function isNonReplayableRequest(config: RetryableConfig | undefined): boolean {
+  const url = config?.url ?? '';
+  const method = (config?.method ?? 'get').toLowerCase();
+  return url.includes('/payments') && method !== 'get';
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -71,6 +100,11 @@ apiClient.interceptors.response.use(
       const newToken = await refreshInFlight;
 
       if (newToken) {
+        // Session recovered, but don't replay a payment mutation — let
+        // the caller decide whether to re-submit (see above).
+        if (isNonReplayableRequest(original)) {
+          return Promise.reject(error);
+        }
         original.headers = original.headers ?? {};
         original.headers.Authorization = `Bearer ${newToken}`;
         return apiClient(original);

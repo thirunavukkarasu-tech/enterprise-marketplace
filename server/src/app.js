@@ -7,6 +7,7 @@ import { env, isDev } from './config/env.js';
 import { logger } from './config/logger.js';
 import { helmetMiddleware, corsMiddleware, sanitizeMiddleware, hppMiddleware } from './middleware/security.js';
 import { globalLimiter } from './middleware/rateLimiter.js';
+import { requestId } from './middleware/requestId.js';
 import { notFound } from './middleware/notFound.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import v1Router from './routes/v1/index.js';
@@ -17,6 +18,11 @@ const app = express();
 // `req.ip` and `secure` cookies work correctly, and so express-rate-limit
 // reads the real client IP instead of the proxy's.
 app.set('trust proxy', 1);
+
+// Attached first, before body parsing — a request that fails to even
+// parse (malformed JSON) still gets an id, still shows up in the access
+// log, and still gets it echoed back in the error response.
+app.use(requestId);
 
 // ── Body & cookie parsing ───────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' })); // small limit: this API is JSON, not a file upload endpoint
@@ -32,8 +38,12 @@ app.use(hppMiddleware);
 app.use(globalLimiter);
 
 // ── Logging ──────────────────────────────────────────────────────────────
+morgan.token('id', (req) => req.id);
+const devFormat = ':id :method :url :status :response-time ms';
+const prodFormat =
+  ':id :remote-addr - :remote-user [:date[clf]] ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"';
 app.use(
-  morgan(isDev ? 'dev' : 'combined', {
+  morgan(isDev ? devFormat : prodFormat, {
     stream: { write: (msg) => logger.info(msg.trim()) },
   })
 );

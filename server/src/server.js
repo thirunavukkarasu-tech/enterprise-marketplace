@@ -6,7 +6,7 @@ import { logger } from './config/logger.js';
 import { initSocket } from './sockets/index.js';
 
 const httpServer = http.createServer(app);
-initSocket(httpServer);
+const io = initSocket(httpServer);
 
 async function start() {
   await connectDB();
@@ -19,6 +19,13 @@ async function start() {
 
 async function shutdown(signal) {
   logger.info(`${signal} received — shutting down gracefully`);
+
+  // Order matters: stop accepting new WS connections and close existing
+  // ones before closing the HTTP server, so nothing is left half-open
+  // during a deploy/restart. socket.io's close() closes its own attached
+  // connections; it does not close httpServer itself.
+  io.close();
+
   httpServer.close(async () => {
     await disconnectDB();
     process.exit(0);

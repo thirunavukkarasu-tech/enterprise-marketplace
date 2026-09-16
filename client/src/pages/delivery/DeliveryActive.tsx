@@ -12,10 +12,10 @@ export function DeliveryActive() {
           <Package className="text-slate" size={22} />
           <p className="text-sm font-medium text-ink">No assignments yet</p>
           <p className="max-w-[220px] text-xs text-slate">
-            Shipment assignment and live tracking are built in Phase 8.
+            Shipment assignment and live tracking are built in Phase 9.
           </p>
           <Badge tone="neutral" className="mt-1">
-            Phase 8
+            Phase 9
           </Badge>
         </CardBody>
       </Card>

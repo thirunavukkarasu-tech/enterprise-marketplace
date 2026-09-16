@@ -18,19 +18,25 @@ import { Checkout } from '../pages/customer/Checkout';
 import { Addresses } from '../pages/customer/Addresses';
 import { MyOrders } from '../pages/customer/MyOrders';
 import { MyOrderDetail } from '../pages/customer/MyOrderDetail';
-import { AdminOverview } from '../pages/admin/AdminOverview';
-import { AdminProducts } from '../pages/admin/AdminProducts';
-import { AdminCategories } from '../pages/admin/AdminCategories';
-import { AdminVendors } from '../pages/admin/AdminVendors';
-import { AdminOrders } from '../pages/admin/AdminOrders';
-import { AdminCoupons } from '../pages/admin/AdminCoupons';
-import { AdminCustomers } from '../pages/admin/AdminCustomers';
-import { AdminAuditLog } from '../pages/admin/AdminAuditLog';
-import { VendorOverview } from '../pages/vendor/VendorOverview';
-import { VendorProducts } from '../pages/vendor/VendorProducts';
-import { VendorProductForm } from '../pages/vendor/VendorProductForm';
-import { VendorProfile } from '../pages/vendor/VendorProfile';
-import { Inventory } from '../pages/vendor/Inventory';
+
+// Admin and vendor screens are lazily loaded — see routes/lazyPages.ts
+// for why these specific screens and not the storefront ones.
+import {
+  AdminOverview,
+  AdminProducts,
+  AdminCategories,
+  AdminVendors,
+  AdminOrders,
+  AdminCoupons,
+  AdminCustomers,
+  AdminAuditLog,
+  VendorOverview,
+  VendorProducts,
+  VendorProductForm,
+  VendorProfile,
+  Inventory,
+} from './lazyPages';
+
 import { DeliveryActive } from '../pages/delivery/DeliveryActive';
 import { PlaceholderPage } from '../components/common/PlaceholderPage';
 import { Unauthorized } from '../pages/Unauthorized';

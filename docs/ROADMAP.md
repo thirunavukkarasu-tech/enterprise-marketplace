@@ -12,13 +12,22 @@
 | 6 | Cart & checkout | ✅ Complete |
 | 7 | Orders, inventory & admin operations | ✅ Complete* |
 | 8 | Payments, coupons & checkout hardening | ✅ Complete |
-| 9 | Delivery & real-time tracking | ⏳ Next |
-| 10 | Reviews & notifications | Planned |
-| 11 | Analytics, testing, hardening & deployment polish | Planned |
+| 9 | Production hardening, testing, observability, CI & deployment readiness | ✅ Complete |
+| 10 | Delivery & real-time tracking | ⏳ Next |
+| 11 | Reviews & notifications | Planned |
 
 \* Real payment gateway integration was still deferred as of Phase 7 —
 Phase 8 below is what actually delivered it (via a mock provider, not a
 real one; see that phase's summary).
+
+Phase 9 was originally slotted last (as "analytics, testing, hardening &
+deployment polish"), but hardening was pulled forward ahead of the
+remaining feature work — it's more useful to have CI, a security review,
+and deployment readiness in place *before* adding more surface area than
+after. Delivery tracking and reviews/notifications shifted down a slot
+accordingly. Advanced analytics was dropped from the numbered plan and
+moved to the deferred list below; the admin dashboard already covers the
+operational reporting this project actually needs.
 
 ## Phase 2 summary — Authentication & RBAC (complete)
 
@@ -335,7 +344,78 @@ real one; see that phase's summary).
   transactions, same requirement as Phase 7's order creation); see
   `README.md` for how
 
-## Phase 9 preview — Delivery & Real-Time Tracking
+## Phase 9 summary — Production Hardening, Testing, Observability & Deployment Readiness (complete)
+
+No new business features by design — this phase made what already
+existed safe, traceable, and shippable.
+
+- **Request correlation** — every request gets an `X-Request-ID`
+  (reused from the caller only if it's a well-formed UUID, never echoed
+  blindly into a log line), attached before body parsing so even a
+  malformed-JSON request is traceable. The same id appears in the access
+  log, any error log, and the error response body.
+- **Structured error contract** — the centralised handler now emits a
+  stable machine-readable `error.code` alongside the existing
+  `message`/`errors` fields. Deliberately **additive**: every pre-Phase-9
+  field is unchanged, so no existing frontend call site broke. Two real
+  bugs were found and fixed here: malformed JSON fell through to a
+  generic `500` (now a `400`), and an **oversized request body also
+  returned `500` while logging a full stack trace** — remotely
+  triggerable by anyone willing to POST 200 kB, which would have buried
+  real errors in log noise. Now a clean `413 PAYLOAD_TOO_LARGE`, handled
+  as an operational error with no stack trace.
+- **Health endpoint** reports environment, uptime, and live database
+  connectivity — and deliberately still returns `200` whenever the
+  process is alive, because external uptime tooling may already depend on
+  that; `database` already carries the connectivity signal.
+- **Graceful shutdown** closes WebSocket connections, then the HTTP
+  server, then MongoDB, with a forced-exit backstop — ordered so nothing
+  is left half-open through a rolling deploy.
+- **Route-level code splitting** — admin and vendor dashboards are now
+  lazily loaded behind a Suspense boundary in `DashboardLayout`. They're
+  role-gated and the only screens importing `recharts`, so a customer
+  never downloads them: main bundle **1,002 kB → 476 kB** (286 kB → 139 kB
+  gzipped), clearing Vite's chunk-size warning. Storefront and customer
+  screens stay eager — they're the first-paint path, where deferring
+  would make things worse, not better.
+- **CI** (`.github/workflows/ci.yml`) — lint, test, build, and a
+  high-severity dependency audit for both packages, plus a separate
+  integration job. **A real bug was found and fixed here**: the
+  integration job used a `services:` MongoDB container, but GitHub
+  Actions provides no way to override a service container's command, so
+  `mongod` always started standalone and `rs.initiate()` failed — silently,
+  because the failure was swallowed by `|| echo`. The transaction-based
+  order and payment suites would have failed. Now started via an explicit
+  `docker run … mongod --replSet`, with readiness and primary-election
+  waits instead of a fixed `sleep`.
+- **A database-free hardening test suite** (19 tests,
+  `tests/integration/hardening.test.js`) — the cross-cutting API
+  guarantees above are now actually asserted, not just implemented:
+  error-envelope shape, no stack-trace leakage, request-id correlation
+  (including that a hostile caller-supplied id is replaced rather than
+  echoed), malformed JSON → 400, oversized body → 413, invalid ObjectId
+  → 400, pagination bounds, sort-enum injection rejection, security and
+  rate-limit headers, and that the health endpoint leaks no connection
+  string or secret. Deliberately needs no database, so unlike the eight
+  domain suites it runs on **every** CI run rather than only where a
+  replica set is provisioned — these are exactly the guarantees that
+  should never regress silently. Backend total: 174 → **193 tests**.
+- **`SECURITY.md`** — supported versions, private reporting process,
+  responsible-disclosure guidance, and an explicit scope section stating
+  that the mock payment provider is a documented stand-in rather than a
+  finding.
+- **README** gained production-oriented Security, Testing, CI,
+  Performance, and Deployment sections, including a pre-deploy checklist
+  covering the non-obvious failure modes (`VITE_API_URL` is baked in at
+  build time; a wrong `CLIENT_URL` silently blocks all CORS;
+  `NODE_ENV=production` is what switches error responses to their safe
+  form).
+- Audited and confirmed already-correct from earlier phases: no
+  committed secrets, boot-time env validation, bounded pagination, closed
+  sort/filter allowlists, projections on populate, and 0 high-severity
+  dependency advisories in either package.
+
+## Phase 10 preview — Delivery & Real-Time Tracking
 
 - Delivery partner assignment to a `vendorGroups` shipment, building on
   the order lifecycle Phase 7 built rather than a parallel one
@@ -365,5 +445,9 @@ the README doesn't imply they were forgotten:
   profile) — currently a placeholder; `Vendor` data has existed since
   Phase 4 and product cards already link store names, but a dedicated
   "shop this seller's other products" page wasn't built in Phase 5
+- Advanced analytics / BI reporting beyond the operational admin and
+  vendor dashboards (dropped from the numbered plan during the Phase 9
+  renumbering — the existing dashboards already cover what this project
+  actually needs to demonstrate)
 - Horizontal scaling notes (Socket.IO adapter for multi-instance
   deployments, e.g. Redis adapter)

@@ -33,6 +33,15 @@ const envSchema = z.object({
   STORAGE_API_SECRET: z.string().optional().default(''),
 
   EMAIL_FROM: z.string().default('no-reply@marketsphere.dev'),
+
+  // Only 'mock' is implemented (src/utils/mockPaymentProvider.js). The
+  // two secrets stay optional and empty because there is no real
+  // provider to hold credentials for — they exist so a real integration
+  // has a validated place to put them rather than introducing new
+  // unvalidated config later.
+  PAYMENT_PROVIDER: z.enum(['mock']).default('mock'),
+  PAYMENT_PROVIDER_SECRET: z.string().optional().default(''),
+  PAYMENT_WEBHOOK_SECRET: z.string().optional().default(''),
 });
 
 function loadEnv() {

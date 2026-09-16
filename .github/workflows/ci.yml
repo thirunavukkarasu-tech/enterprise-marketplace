@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Cancel an in-progress run for the same ref when a new commit lands —
+# a superseded run's result is no longer interesting.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server (lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the `engines.node` floor in server/package.json.
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # Runs the unit suite plus the health-check integration tests.
+      # The database-backed integration suites self-skip when
+      # TEST_MONGODB_URI is unset (see tests/integration/*.test.js) —
+      # they need a MongoDB replica set for the transaction-based order
+      # and payment flows, which isn't provisioned here. See the
+      # `server-integration` job below for how to enable them.
+      - run: npm test
+
+      # Fails the build on a known high/critical advisory in a runtime
+      # dependency. `--omit=dev` keeps a devDependency advisory from
+      # blocking a release for code that never ships.
+      - name: Dependency audit
+        run: npm audit --audit-level=high --omit=dev
+
+  client:
+    name: Client (lint + typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      # `npm run build` already runs `tsc -b` before `vite build`, so a
+      # type error fails the build — no separate typecheck step needed.
+      - run: npm run build
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high --omit=dev
+
+  server-integration:
+    name: Server (integration, MongoDB replica set)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+
+    # Deliberately NOT a `services:` container. Order creation (Phase 7)
+    # and payment/order consistency (Phase 8) use MongoDB transactions,
+    # which require a replica set — and a replica set requires starting
+    # mongod with `--replSet`. GitHub Actions service containers expose
+    # `image`/`env`/`ports`/`options` but give no way to override the
+    # container's command, so a `services:` mongo always comes up as a
+    # standalone and `rs.initiate()` against it fails with "not started
+    # with --replSet". Starting it with an explicit `docker run` is the
+    # supported way to pass that flag without pulling in a third-party
+    # action.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: Start MongoDB as a single-node replica set
+        run: |
+          docker run -d --name mongo-rs -p 27017:27017 mongo:7 \
+            mongod --replSet rs0 --bind_ip_all
+
+          # Wait for mongod to accept connections before initiating.
+          for i in $(seq 1 30); do
+            if docker exec mongo-rs mongosh --quiet --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1; then
+              echo "mongod is up"
+              break
+            fi
+            sleep 2
+          done
+
+          docker exec mongo-rs mongosh --quiet --eval \
+            'rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]})'
+
+          # Wait until the node has actually become PRIMARY — rs.initiate()
+          # returns before the election completes, and connecting too early
+          # fails with "not primary".
+          for i in $(seq 1 30); do
+            if docker exec mongo-rs mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' >/dev/null 2>&1; then
+              echo "replica set is primary"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run integration suites
+        env:
+          # Test-only throwaway values. Nothing here is a real secret and
+          # none of it is used outside this ephemeral runner.
+          TEST_MONGODB_URI: mongodb://127.0.0.1:27017/marketsphere-ci?replicaSet=rs0&directConnection=true
+          NODE_ENV: test
+        run: npm test

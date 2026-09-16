@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { type LucideIcon, LogOut } from 'lucide-react';
 import { Logo } from '../components/common/Logo';
+import { Spinner } from '../components/common/Spinner';
 import { Badge } from '../components/ui/Badge';
 import { useAppDispatch, useAppSelector } from '../hooks/useAppStore';
 import { logoutUser } from '../features/auth/authSlice';
@@ -80,7 +82,19 @@ export function DashboardLayout({ navItems, roleLabel, roleTone = 'indigo' }: Da
       </aside>
 
       <div className="flex-1">
-        <Outlet />
+        {/* Admin and vendor pages are lazily loaded (see routes/router.tsx)
+            so a customer never downloads the dashboard bundle — including
+            recharts, which only these screens use. One boundary here
+            covers every child route rather than wrapping each element. */}
+        <Suspense
+          fallback={
+            <div className="flex min-h-[60vh] items-center justify-center">
+              <Spinner />
+            </div>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </div>
     </div>
   );
